@@ -168,6 +168,33 @@ struct BondConstraints {
  *      → Speculating on multiple outcomes becomes economically irrational
  *
  *
+ * ━━━━  WHAT ATTACKERS SEE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *
+ * At bond creation, attackers observe ONLY:
+ *   - Commitment hash (opaque 32 bytes)
+ *   - Stake token and amount
+ *
+ * Hidden until execution:
+ *   - User address (bonds can be created via relayers or other accounts)
+ *   - Protocol address
+ *   - Function being called
+ *   - Call parameters
+ *   - Funding tokens and amounts
+ *
+ * All bonds flow through the singleton BondRoute contract — attackers cannot distinguish which protocol a bond targets.
+ * Stake ratios vary by protocol, so stake amount reveals little about transaction value.
+ *
+ *
+ * ━━━━  STAKE SIZING  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *
+ * Stake makes bond farming unprofitable — not impossible, but economically irrational.
+ *
+ * Size stake relative to potential extraction. If MEV opportunity is X% of transaction value, stake should exceed X%
+ * so that losses on trapped bonds outweigh gains from successful extractions.
+ *
+ * See MECHANISM_DEEP_DIVE.md for detailed game theory analysis.
+ *
+ *
  * ━━━━  HOW STAKE RECOVERY WORKS  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  *
  * **Stake is automatically returned upon any execution attempt.**
@@ -413,8 +440,10 @@ uint256 constant TOKEN_AMOUNT_SIZE              =   2 * WORD_SIZE;  // - token, 
  *    At execution time, calls `BondRoute_quote_call` with actual stake/fundings as preferred values,
  *    then validates the returned constraints against the execution context.
  *
- *    *WARNING*: Dynamic constraints (based on contract state) may return different values at
- *    execution time vs creation time. Design constraints accordingly.
+ *    *WARNING*: Dynamic constraints may return different values between bond creation time and bond execution time.
+ *    If constraints INCREASE, bonds may subtly fail with `InsufficientStake`, settling the bond and returning stake — creating 
+ *    occasional escapes from the trap.
+ *    Prefer static constraints or consider sizing the stake and max execution timing for negative expected value overall.
  *
  * 2. CONTEXT PASSING VIA CALLDATA
  *    Encodes `BondContext` into calldata and `delegatecall`s into the protected function.
@@ -779,7 +808,12 @@ abstract contract BondRouteProtected is IBondRouteProtected {
 /**
  * @title FundingsLib
  * @notice Helper library for transferring user funds via BondRoute
+ *
  * @dev Usage: `using FundingsLib for BondContext;` then call `ctx.pull(token, amount)` or `ctx.send(token, amount, recipient)`
+ *
+ * @dev Fundings remain in user's wallet until pulled — they never touch BondRoute. Protocols direct where funds flow via `transfer_funding()`.
+ *      When funding token matches stake token, staked funds (held by BondRoute) are used first
+ *      (capital efficient: 1000 USDC swap with 100 USDC stake needs only 900 USDC in wallet).
  */
 library FundingsLib {
 

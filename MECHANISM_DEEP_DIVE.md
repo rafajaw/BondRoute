@@ -39,9 +39,11 @@ This is the key insight that makes BondRoute work.
 
 > "If your bond's parameters 'succeed' but the outcome is unfavorable, you're trapped — execute a bad trade OR forfeit stake."
 
-The bonds that FAIL (slippage exceeded, bid too low) return stake gracefully.
+Bonds that FAIL validation (e.g. slippage exceeded, bid too low) typically return stake gracefully — this is protocol-defined behavior.
 
-The bonds that "SUCCEED" at bad terms are the trap.
+Bonds that "SUCCEED" at bad terms are the trap.
+
+Note: Some failures trigger `PossiblyBondFarming` (stake remains locked, retry allowed while within valid execution window) — e.g., missing approvals, transfer failures, insufficient gas. This prevents attackers from intentionally failing execution in order to recover stake.
 
 ---
 
@@ -168,7 +170,7 @@ To speculate profitably, an attacker needs:
 
 1. **Multiple positions** covering different outcomes
 2. **Ability to abandon** unprofitable positions cheaply
-3. **Ability to execute** only the profitable one
+3. **Ability to execute** only the profitable ones
 
 BondRoute breaks requirement #2. You can't abandon bonds that "succeed" for free.
 
@@ -178,9 +180,15 @@ If an attacker creates N bonds covering a range of outcomes:
 
 - Some bonds will fail validation → stake returned (no cost, no gain)
 - Some bonds will "succeed" at unfavorable terms → **trapped**
-- At most one bond will succeed at favorable terms → profit
+- Some bonds may succeed at favorable terms → profit
 
-For speculation to pay, the profit from the one winning bond must exceed the losses from all the trapped bonds. As stake requirements increase relative to potential profit, speculation becomes unprofitable.
+For speculation to pay, the profits from winning bonds must exceed the losses from all the trapped bonds. As stake requirements increase relative to potential profit, speculation becomes unprofitable.
+
+### Protocol Design Considerations
+
+Constraints should ideally be **static** — returning the same values at bond creation and bond execution. This ensures the trap works reliably.
+
+Dynamic constraints (values that change over time) may be acceptable for some use cases, but caution is advised. If constraints INCREASE between bond creation and bond execution, some bonds may escape via validation failure instead of being trapped. Size stake and timing windows accordingly — occasional escapes don't break the economics when trapped losses dominate.
 
 ---
 
