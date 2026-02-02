@@ -13,9 +13,7 @@
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━  trustless fair play  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-**A cryptographic bond primitive.**
-
-Application-level staked commitments designed for adversarial environments.
+**Application-level staked commitments designed for adversarial environments.**
 
 > [!WARNING]
 > **Security Status: Public Adversarial Review.** This code is under review prior to mainnet deployment. See [Security](#security).
@@ -24,20 +22,32 @@ Application-level staked commitments designed for adversarial environments.
 
 ## TL;DR
 
-**The problem:** Billions in value have been extracted from legitimate users by bots and sophisticated actors on public blockchains — existing solutions don't eliminate this, they introduce trust assumptions and socialize the extraction.
+**The problem:** Billions in value have been extracted from legitimate users by bots and sophisticated actors on public blockchains. Existing solutions don't eliminate this, they introduce trust assumptions and socialize the extraction.
 
 **Solution:** BondRoute enables trustless fair play through staked commitments.
 
 - **For protocols:** Stop leaking value.
 - **For users:** Better prices. Fair competition.
 - **For infrastructure:** Less spam. Cleaner blockspace.
-- **No intermediaries:** No centralization. No censorship. No fees.
+- **No intermediaries:** No centralization. No censorship. No protocol fees.
 - **Trust model:** Permissionless. Immutable. Fully on-chain.
 
-> [!NOTE]
-> BondRoute replaces permanent MEV losses (often 0.5–5% per transaction) with a small, temporary stake that is automatically refunded on execution.
+Stake is automatically refunded on execution. You only lose stake if you fail to execute within the protocol's window — for legitimate users, that typically requires rare events like power outages or prolonged network failure. Even assuming a 1% stake and 1% failure rate:
+
+**Expected value loss:**
+
+| | Per transaction | After 10 transactions |
+|---|---|---|
+| No protection | 0.5–5% | 5–50% |
+| Existing solutions | ~0.1–1% (opaque) | 1–10% |
+| **BondRoute** | **0.01%** | **0.1%** |
+
+> [!IMPORTANT]
+> Existing solutions extract value implicitly via spreads, solver discretion, and orderflow internalization. This extraction is not observable on-chain, cannot be bounded or audited by users, and is permanently lost.
 >
-> For coordination use cases, like blind auctions, it deters participants from hedging across multiple positions and cherry-picking the winner.
+> BondRoute replaces permanent MEV losses with a small refundable stake enforced on-chain at the application layer, preserving Ethereum’s trust-minimized architecture.
+
+For coordination use cases, such as blind auctions, BondRoute also deters hedging across multiple positions and cherry-picking outcomes.
 
 ---
 
@@ -115,6 +125,7 @@ contract YourToken is ERC20, BondRouteProtected {
 - [Integration Overview](#integration-overview)
 - [Wallet Signing UX](#wallet-signing-ux)
 - [Composability](#composability)
+- [Trade-offs and Limitations](#trade-offs-and-limitations)
 - [Technical Highlights](#technical-highlights)
 - [Trust Model](#trust-model)
 - [Deployment](#deployment)
@@ -149,6 +160,22 @@ BondRoute gives your protocol two properties that eliminate these attacks:
 **Binding economics** — Bonds lock stake with fixed parameters. Execute to recover stake, or forfeit. Bonds that "succeed" at unfavorable terms trap you: execute a bad trade or lose stake. Bond farming doesn't pay.
 
 The result: no frontrunning without a bond, and speculating on bonds is unprofitable.
+
+### Why This Must Live at the Application Layer
+
+Infrastructure can't price these protections correctly. A stake appropriate for a $10 swap is dangerously low for a $10M auction bid. An execution window safe for a token transfer may be exploitable for a liquidation.
+
+Only your protocol knows the economics. BondRoute provides the primitive for binding commitments — you define what "binding" means.
+
+### Infrastructure Benefits
+
+When spam becomes expensive, it stops. Blockspace currently filled with speculative garbage — failed arbitrage attempts, racing bots, reverted probes — clears out. Gas prices drop. Infrastructure provisioning serves real users instead of absorbing spam.
+
+### No Centralization. No Censorship.
+
+Current solutions rely on intermediaries — block builders, relays, solver networks. These create centralization pressure and censorship vectors.
+
+BondRoute is fully on-chain. No intermediaries. No one to centralize around. No one to censor.
 
 ### Concrete Examples
 
@@ -196,22 +223,6 @@ You control the security model. Your protocol defines:
 
 Integrate one file. Implement two functions. See [Quick Start](#quick-start).
 
-### Why This Must Live at the Application Layer
-
-Infrastructure can't price these protections correctly. A stake appropriate for a $10 swap is dangerously low for a $10M auction bid. An execution window safe for a token transfer may be exploitable for a liquidation.
-
-Only your protocol knows the economics. BondRoute provides the primitive for binding commitments — you define what "binding" means.
-
-### Infrastructure Benefits
-
-When spam becomes expensive, it stops. Blockspace currently filled with speculative garbage — failed arbitrage attempts, racing bots, reverted probes — clears out. Gas prices drop. Infrastructure provisioning serves real users instead of absorbing spam.
-
-### No Centralization. No Censorship.
-
-Current solutions rely on intermediaries — block builders, relays, solver networks. These create centralization pressure and censorship vectors.
-
-BondRoute is fully on-chain. No intermediaries. No one to centralize around. No one to censor.
-
 ---
 
 ## How BondRoute Works
@@ -248,16 +259,20 @@ BondRoute is fully on-chain. No intermediaries. No one to centralize around. No 
 │                                                                             │
 │  OBSERVABLE:                                                                │
 │  create_bond( 0xcaffe0...commitment_hash, stake )                           │
+│  ├── Stake token and amount                                                 │
+│  └── Transaction sender (NOT necessarily the bond owner)                    │
 │                                                                             │
-│  HIDDEN:                                                                    │
-│  ├── Protocol:   ???                                                        │
-│  ├── Function:   ???                                                        │
-│  ├── Parameters: ???                                                        │
-│  ├── Tokens:     ???                                                        │
-│  └── Amounts:    ???                                                        │
+│  HIDDEN (inside commitment hash):                                           │
+│  ├── Bond owner:      ???                                                   │
+│  ├── Protocol:        ???                                                   │
+│  ├── Function:        ???                                                   │
+│  ├── Parameters:      ???                                                   │
+│  ├── Funding tokens:  ???                                                   │
+│  └── Funding amounts: ???                                                   │
 │                                                                             │
 │  All bonds go through the BondRoute singleton.                              │
-│  Attackers can't even tell which protocol is being used.                    │
+│  Any address can create bonds on behalf of others.                          │
+│  Attackers can't tell which protocol, user, or action is involved.          │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -408,7 +423,7 @@ const constraints = await protocol.BondRoute_quote_call(
 ### 3. Create Bond
 
 > [!CAUTION]
-> **If you lose your salt, you cannot execute your bond and your stake is forfeited.** Use 32-bit (~4 billion) for recoverability — you can brute-force it in minutes if you know your other parameters. Use 256-bit only if secrecy is paramount. Bots must also guess protocol, call, amounts, and tokens — the salt is just one factor in the commitment hash.
+> **If you lose your salt, you cannot execute your bond and your stake is forfeited.** Use 32-bit (~4 billion) for recoverability — you can brute-force it in minutes if you know your other parameters (protocol call and exact fundings). Use 256-bit only if secrecy is paramount. Bots must also guess protocol, call, amounts, and tokens — the salt is just one factor in the commitment hash.
 
 ```javascript
 const salt = random_uint32();  // 32-bit recommended for recoverability
@@ -481,7 +496,7 @@ Two exceptions:
 - `PossiblyBondFarming` revert → stake remains locked, user can retry
 - Bond expires without execution → stake forfeited
 
-> [!IMPORTANT]
+> [!NOTE]
 > **Why `PossiblyBondFarming` keeps stake locked:**
 > Without it, attackers could freely recover stakes from abandoned bonds by intentionally failing execution — revoking approvals, transferring funds away, executing outside the allowed window, or starving the transaction of gas. Reverting the transaction prevents this while allowing legitimate users to fix the issue and retry.
 
@@ -489,19 +504,25 @@ Two exceptions:
 
 ## Wallet Signing UX
 
-EIP-712 signatures typically show users an unreadable hash. BondRoute lets protocols override this.
+With gasless execution, users sign a single human-readable message — no gas, no multiple approvals. Up to 4 funding tokens in one signature. A relayer handles the on-chain transactions.
 
-**Default experience:**
+**From the user's perspective:**
+- Today (Permit2): Sign per token → Sign transaction → Pay gas → Wait for confirmation
+- BondRoute gasless: Sign once → Wait for confirmation
+
+**Today's signing UX:**
 ```
-Sign this message?
-Data: 0x7a3f9b2c...
+Spender: 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD
+Value: 1000000000
+Nonce: 7
+Deadline: 1706140800
 ```
 
-**With protocol customization:**
+**BondRoute with protocol customization:**
 ```
-Sign this message?
 Swap 1,000 USDC for ETH
 Minimum output: 0.5 ETH
+Stake: 10 USDC (refunded on execution)
 ```
 
 Protocols implement `BondRoute_get_signing_info()` to provide human-readable signing data. Users see exactly what they're committing to — not a hash.
@@ -513,6 +534,16 @@ This is optional. If not implemented, wallets display the default calldata hash.
 ## Composability
 
 BondRoute is forward-compatible with ERC-4337, EIP-7702, and the emerging smart wallet ecosystem.
+
+**What works:**
+- Sequential bond execution (swap then deposit, each with known parameters)
+- Flash loan callbacks (borrowed capital funds executions, atomicity preserved)
+- Smart wallet orchestration of multiple bonds
+- Return values from executed bonds available to calling contract
+
+**What doesn't work:**
+- Passing output of bond A as input to bond B (parameters are fixed at creation)
+- Dynamic amounts that depend on runtime state
 
 Traditional composability chains contract calls dynamically:
 ```solidity
@@ -535,9 +566,21 @@ Why? If parameters were dynamic, bonds would not be commitments. An attacker cou
 
 Fixed parameters are the mechanism that turns stakes from deposits into deterrents.
 
-**Flash loans work perfectly.** Execute bonds inside flash loan callbacks — borrowed capital funds executions, atomicity preserved.
+---
 
-**The orchestration layer moves up to where the user controls it.**
+## Trade-offs and Limitations
+
+**Two transactions per bond.** Create and execute are separate transactions. This is inherent to commit-reveal — you cannot commit and reveal in the same block. With a relayer, the user signs once off-chain and the relayer handles both transactions.
+
+**Latency.** Bonds require at least one block between create and execute. Existing MEV solutions have comparable or higher latency.
+
+**Stake patterns are observable.** Transaction sender, stake token, and stake amount are visible on-chain. The bond owner's address is hidden inside the commitment hash, and any address can create bonds on behalf of others (relayers, different accounts) — but repeated patterns could fingerprint users and protocols.
+
+**Protocol-specific defense.** BondRoute protects functions within integrated contracts. MEV and gaming outside of protected contracts are unaffected.
+
+**Parameters are fixed at creation.** You cannot compose bond outputs as inputs to other bonds. This is intentional — dynamic parameters would break the commitment mechanism. See [Composability](#composability).
+
+**Salt must be stored client-side.** Losing the salt could lead to losing the stake. Your wallet or frontend should store this automatically — manual recovery is a last resort. See the [salt caution](#3-create-bond) in User Flow.
 
 ---
 
@@ -549,7 +592,7 @@ Fixed parameters are the mechanism that turns stakes from deposits into deterren
 - **Sentineled commitment hashes** — `0xcaffe0...` prefix with embedded checksum validates chain, stake, and hash integrity at bond creation, preventing accidental stake loss.
 - **Automatic reentrancy guard** — Protected functions are safe from reentrancy attacks by default.
 - **Same address everywhere** — CREATE2 deterministic deployment across all EVM chains.
-- **Low gas overhead** — Only a few cents on Ethereum, even less on other chains.
+- **Low gas overhead** — Typically a few cents on Ethereum, even less on L2s or other EVM chains.
 
 ---
 
@@ -559,8 +602,8 @@ Fixed parameters are the mechanism that turns stakes from deposits into deterren
 
 - **No admin keys** — nobody can pause, freeze, or modify
 - **No upgrades or proxies** — deployed bytecode is final
-- **No fees** — free primitive, no rent extraction
-- **Minimal collector role** — can only claim expired bonds
+- **No protocol fees** — free primitive, no rent extraction
+- **Minimal collector role** — can only claim expired bonds, nothing else
 - **Deterministic address** — same address across all EVM chains
 
 Verify the code once. Trust the deployed bytecode.
@@ -587,6 +630,7 @@ Deployment will be:
 - Deterministic (CREATE2)
 - Immutable (no upgrade paths)
 - Identical address across all EVM chains
+- Requires Cancun-level EVM (EIP-1153 transient storage)
 
 The final deployment transaction, contract address, and verification links will be published here prior to launch.
 
@@ -648,7 +692,7 @@ Without BondRoute, your protocol is unprotected — like running a webapp on HTT
 <details>
 <summary><strong>What's the integration effort?</strong></summary>
 
-One file. Two functions. Most teams integrate in an afternoon. See Quick Start.
+One file. Two functions. See Quick Start.
 </details>
 
 <details>
@@ -699,7 +743,7 @@ The collector is an address that can claim stakes from expired bonds. It can be 
 <details>
 <summary><strong>What gas overhead should I expect?</strong></summary>
 
-~39-66k gas depending on stake type and access pattern. Typically a few cents on Ethereum, even less on other EVM chains.
+~60-87k gas depending on stake type, including the 21k base cost of the additional transaction. Typically a few cents on Ethereum, even less on other EVM chains.
 </details>
 
 <details>
@@ -719,7 +763,7 @@ Yes. Use `address(0)` (or `NATIVE_TOKEN` constant) for stakes or fundings. No wr
 <details>
 <summary><strong>Why do I need to create a bond before swapping?</strong></summary>
 
-The bond hides your intent, preventing execution-time value extraction during the swap.
+The bond hides your intent and locks a small stake, preventing bots from frontrunning or gaming your swap. Stake is automatically refunded on execution.
 </details>
 
 <details>
@@ -731,7 +775,7 @@ You lose your stake. Execute within the protocol's time window to get it back au
 <details>
 <summary><strong>What happens if I forget my salt?</strong></summary>
 
-With a 32-bit salt (~4 billion combinations), you can brute-force recover it in minutes if you know your other parameters. With a 256-bit salt, recovery is impossible — store it safely.
+With a 32-bit salt (~4 billion combinations), brute-force recovery is feasible — but only if you know all other bond parameters (protocol call and exact fundings). If any are wrong or forgotten, brute-force won't find the salt. With a 256-bit salt, recovery is impossible regardless. Store your salt safely.
 </details>
 
 <details>
