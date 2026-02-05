@@ -14,16 +14,16 @@ Traditional commit-reveal schemes hide intent during the commit phase, but at re
 
 **BondRoute is different.** At reveal time, attackers cannot frontrun because:
 
-1. Protected functions reject naked (unbonded) calls
-2. Attackers couldn't have created bonds — they didn't know what to bond for
-3. Even if they bonded speculatively, the economics trap them
+1. **Reserved execution** — Protected functions reject naked (unbonded) calls. When attackers see your `execute_bond` in the mempool, they can't just call the contract directly.
+2. **Timing** — To frontrun, they'd need their own bond. But creating a bond requires waiting blocks (minimum delay enforced by protocol). By the time they could execute, your transaction already went through.
+3. **Economics** — What about pre-creating bonds speculatively? If the search space is large (e.g., unique strings), they can't cover it. If it's small (e.g., bid amounts), protocols can require stakes that make speculation unprofitable.
 
 **The two pillars:**
 
 | Pillar | What it does |
 |--------|--------------|
 | **Reserved Execution** | Protected functions reject naked calls. You MUST have a bond to execute. |
-| **Binding Economics** | Fixed parameters + stake = no free optionality. Bonds that "succeed" at unfavorable terms trap you. |
+| **Binding Economics** | Fixed parameters + protocol-defined stakes = no free optionality. Bonds that "succeed" at unfavorable terms trap you. |
 
 ---
 
@@ -184,6 +184,22 @@ If an attacker creates N bonds covering a range of outcomes:
 
 For speculation to pay, the profits from winning bonds must exceed the losses from all the trapped bonds. As stake requirements increase relative to potential profit, speculation becomes unprofitable.
 
+### When Stakes Matter Most
+
+The need for stakes depends on how feasible preemptive bond farming is:
+
+| Factor | Low Risk | High Risk |
+|--------|----------|-----------|
+| **Search space** | Large (unique strings, unpredictable params) | Small (bid amounts, swap sizes) |
+| **Gas costs** | Expensive (Ethereum mainnet during congestion) | Cheap (L2s, low-activity periods) |
+| **Potential reward** | Low value transactions | High value transactions |
+
+**Large search space:** If parameters are unpredictable (e.g., registering a 10-character username), attackers can't cover the space. Reserved execution alone may suffice.
+
+**Small search space + cheap gas:** If parameters are guessable (e.g., bid amounts from $100-$10,000) and gas is cheap, attackers can blanket the range with pre-created bonds. Stakes make this unprofitable.
+
+Only the protocol knows its economics. BondRoute provides the primitive — protocols define the constraints.
+
 ### Protocol Design Considerations
 
 Constraints should ideally be **static** — returning the same values at bond creation and bond execution. This ensures the trap works reliably.
@@ -198,7 +214,7 @@ Dynamic constraints (values that change over time) may be acceptable for some us
 
 Traditional commit-reveal: At reveal, attackers see and frontrun.
 
-BondRoute: At reveal, attackers can't frontrun because protected functions reject unbonded calls. No bond = rejected. And attackers couldn't have bonded in advance — they didn't know what to bond for.
+BondRoute: At reveal, attackers can't frontrun because protected functions reject unbonded calls — and executing a bond requires waiting blocks after creation. By the time they could act, your transaction already executed. Pre-create bonds speculatively? Protocols can require stakes that make that math negative.
 
 ### "Just abandon the bad bonds"
 
@@ -207,8 +223,8 @@ You can't abandon bonds that "succeed" for free. If your params pass validation,
 ### "The defense is hiding intent"
 
 Hiding helps, but the real defense is:
-1. Requiring bonds (reserved execution)
-2. Making speculation unprofitable (the trap mechanism)
+1. Requiring bonds + delay (reserved execution) — blocks reactive frontrunning
+2. Protocol-defined stakes (binding economics) — blocks preemptive speculation
 
 ### "Each attempt costs real money"
 
@@ -223,17 +239,17 @@ Imprecise. Failed attempts (slippage exceeded, bid too low) return stake. The co
 | **Naked call** | A call to a protected function without a bond. Rejected. |
 | **Bond farming** | Creating multiple bonds to speculate on different outcomes, executing only profitable ones. Unprofitable because trapped bonds force losses. |
 | **Reserved execution** | Protected functions require a bond to execute. |
-| **Binding economics** | Fixed params + stake = no free optionality. |
+| **Binding economics** | Fixed params + protocol-defined stakes = no free optionality. |
 | **The trap** | Bonds that "succeed" at unfavorable terms force you to execute a bad outcome or forfeit stake. |
 
 ---
 
 ## Summary
 
-BondRoute doesn't just hide intent. It makes speculation unprofitable.
+BondRoute doesn't just hide intent. It closes both attack vectors.
 
-1. **Reserved execution** — Can't frontrun without a bond
-2. **Binding economics** — Can't speculate without getting trapped
+1. **Reserved execution** — Can't frontrun reactively. By the time attackers see your intent, they'd need a bond + delay. Too late.
+2. **Binding economics** — Can't speculate preemptively. Protocols can require stakes that make the math negative.
 
 The trap isn't losing stake on abandoned bonds. The trap is being forced to choose between executing a bad trade or forfeiting stake on bonds that technically "succeed."
 
