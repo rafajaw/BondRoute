@@ -15,8 +15,8 @@
 
 **Application-level staked commitments designed for adversarial environments.**
 
-> [!WARNING]
-> **Security Status: Public Adversarial Review.** This code is under review prior to mainnet deployment. See [Security](#security).
+> [!NOTE]
+> **BondRoute has not been audited by a major auditing firm.** It has been designed with a strong security focus and best practices, and has undergone public adversarial review. See [Security](#security).
 
 ---
 
@@ -624,58 +624,37 @@ Gasless execution is an optional UX layer, not a trust assumption.
 
 ## Deployment
 
-BondRoute has not yet been deployed.
+**Contract address:**
 
-Deployment will be:
-- Deterministic (CREATE2)
-- Immutable (no upgrade paths)
-- Identical address across all EVM chains
-- Requires Cancun-level EVM (EIP-1153 transient storage)
+```
+0xb01d00000000440215e86e0A436f9b59FeB2F14a
+```
 
-The final deployment transaction, contract address, and verification links will be published here prior to launch.
+🟢 **LIVE** on:
+- [Ethereum](https://etherscan.io/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Arbitrum](https://arbiscan.io/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Avalanche](https://snowscan.xyz/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Base](https://basescan.org/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [BNB Chain](https://bscscan.com/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Gnosis](https://gnosisscan.io/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Ink](https://explorer.inkonchain.com/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Linea](https://lineascan.build/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [MegaETH](https://megaexplorer.xyz/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Monad](https://monadvision.com/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Optimism](https://optimistic.etherscan.io/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Polygon](https://polygonscan.com/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Scroll](https://scrollscan.com/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+- [Unichain](https://uniscan.xyz/address/0xb01d00000000440215e86e0A436f9b59FeB2F14a)
+
+Same address on every chain — deterministic CREATE2 deployment. Immutable. Requires Cancun-level EVM (EIP-1153 transient storage).
 
 ---
 
 ## Security
 
-**Status: Public Adversarial Review**
+**BondRoute has not been audited by a major auditing firm.** It has been designed with a strong security focus and best practices, and has undergone public adversarial review. The deployed bytecode is immutable — what you verify is what runs.
 
-BondRoute is under public adversarial review prior to mainnet deployment.
-
-This is not a beta. The code under review is the code that will be deployed.
-
-**Commit under review:** `0x062b5aed6b48560189efec7c85e8f6b2b326fa6c`
-
-### Bounty
-
-We're offering bounties for responsibly disclosed vulnerabilities:
-
-| Severity | Reward |
-|----------|--------|
-| Critical | up to $10,000 |
-| High | up to $5,000 |
-
-**What qualifies:**
-- Loss of user funds
-- Loss of stake funds
-- Bypass of commit-reveal protection
-- Griefing vectors with material impact
-
-**Reporting:** security@bondroute.xyz
-
-Please include a proof-of-concept or minimal reproduction where applicable.
-
-All valid submissions acknowledged and credited.
-
-### Improvements
-
-Not a vulnerability, but a better approach? Gas optimization? Design insight that meaningfully improves the primitive?
-
-We compensate valuable contributions - not just bugs.
-
-**Contact:** hello@bondroute.xyz
-
-This is pre-deployment. Everything is on the table.
+**Responsible disclosure:** security@bondroute.xyz — see [SECURITY.md](SECURITY.md) for details and bounty information.
 
 ---
 
