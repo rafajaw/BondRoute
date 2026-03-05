@@ -158,14 +158,14 @@ struct BondConstraints {
  *
  *   1. RESERVED EXECUTION (prevents frontrunning)
  *      - Intent hidden in commitment hash
- *      - Protected functions reject unbonded calls
- *      - Minimum block delay between creation and execution
+ *      - Protected functions reject unbonded calls and enforce a protocol-specified block delay before execution
  *      → Attackers can't see what to bond for and can't react in time
  *
- *   2. ABANDONMENT COST (prevents bond farming)
- *      - Each bond requires stake proportional to value
- *      - Stake recoverable only through execution attempts
- *      → Speculating on multiple outcomes becomes economically irrational
+ *   2. BINDING ECONOMICS (prevents preemptive bond farming)
+ *      - Each bond requires explicit, protocol-defined stake
+ *      - Stake recoverable only through execution attempts; expired bonds forfeit stake
+ *      → Without stakes, attackers pre-create bonds covering likely parameters and let unused ones expire for free
+ *      → Stakes make this unprofitable: losses on abandoned bonds exceed gains from the few that hit
  *
  *
  * ━━━━  WHAT ATTACKERS SEE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

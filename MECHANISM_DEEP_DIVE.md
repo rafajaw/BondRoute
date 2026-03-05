@@ -8,22 +8,81 @@ Read this if you want to understand the mechanism beyond the README overview.
 
 ## Core Mental Model
 
-**The defense is NOT primarily about hiding intent.**
+BondRoute's defense rests on two pillars:
 
-Traditional commit-reveal schemes hide intent during the commit phase, but at reveal time attackers can still frontrun. Critics say "commit-reveal doesn't prevent MEV."
+1. **Reserved execution** — Protected functions reject unbonded calls, and bonds can only be executed after a protocol-specified block delay. When attackers see your `execute_bond` in the mempool, they can't just call the contract directly — they'd need their own bond, and executing it requires waiting blocks. By the time they could act, your transaction already went through.
 
-**BondRoute is different.** At reveal time, attackers cannot frontrun because:
+2. **Binding economics** — Reserved execution alone doesn't stop preemptive speculation. In traditional commit-reveal schemes, attackers can pre-create commitments covering likely parameters — swap amounts cluster around round numbers, auction bids follow common increments, popular names are obvious targets. A multicall contract can create hundreds of commitments in a single transaction for pennies on Ethereum, and orders of magnitude less on L2s. Without stakes, the 99.9% that don't match expire for free. BondRoute lets protocols require stakes that make this kind of attack unprofitable.
 
-1. **Reserved execution** — Protected functions reject naked (unbonded) calls. When attackers see your `execute_bond` in the mempool, they can't just call the contract directly.
-2. **Timing** — To frontrun, they'd need their own bond. But creating a bond requires waiting blocks (minimum delay enforced by protocol). By the time they could execute, your transaction already went through.
-3. **Economics** — What about pre-creating bonds speculatively? If the search space is large (e.g., unique strings), they can't cover it. If it's small (e.g., bid amounts), protocols can require stakes that make speculation unprofitable.
+Reserved execution prevents frontrunning. Binding economics prevents preemptive bond farming. Most protocols need both.
 
-**The two pillars:**
+---
 
-| Pillar | What it does |
-|--------|--------------|
-| **Reserved Execution** | Protected functions reject naked calls. You MUST have a bond to execute. |
-| **Binding Economics** | Fixed parameters + protocol-defined stakes = no free optionality. Bonds that "succeed" at unfavorable terms trap you. |
+## Case Study: Commit-Reveal Without Stakes
+
+ENS (Ethereum Name Service) is the most widely deployed commit-reveal system on Ethereum. Examining its mechanism reveals exactly what happens when commit-reveal lacks binding economics.
+
+### How ENS commit-reveal works
+
+ENS uses a two-step registration process ([ETHRegistrarController.sol](https://github.com/ensdomains/ens-contracts/blob/master/contracts/ethregistrar/ETHRegistrarController.sol)):
+
+1. **Commit** — `commit(hash)` stores `keccak256(abi.encode(Registration))` where `Registration` includes the name, owner, secret (salt), duration, and other fields
+2. **Wait** — minimum 60 seconds (`minCommitmentAge`)
+3. **Register** — `register(Registration)` reveals all fields in plaintext, validates the commitment, and registers the name
+4. **Expiry** — commitments expire after 24 hours (`maxCommitmentAge`)
+
+The commitment hash includes the `owner` address. This means an attacker and a victim can independently hold valid commitments for the same name — different owners produce different hashes. Both coexist in the `commitments` mapping without interfering.
+
+### The attack: preemptive name sniping
+
+**Step 1: Build a candidate list.** Curate high-value unregistered names: "pay", "bank", "swap", "lend", common 3-letter words, trending terms.
+
+**Step 2: Maintain standing commitments.** Commit to the entire list. At 0.04 gwei (achievable during low-activity periods on Ethereum mainnet), each commitment costs about $0.004 in gas. Via multicall, 2,000 names cost about $8. Refresh every 24 hours.
+
+**Step 3: Monitor and snipe.** When a victim calls `register(Registration{label: "bank", owner: VICTIM, ...})`, the name appears in plaintext in the calldata. The attacker already has a valid commitment for "bank" (with `owner: ATTACKER`). Submit `register()` with higher gas. Attacker's transaction executes first, victim's reverts with `NameNotAvailable`.
+
+**Step 4: Profit.** The attacker owns the name. Unused commitments expire silently — zero penalty.
+
+**Cost:** about $8/day for 2,000 names, about $2,920/year. **One sniped high-value name pays for years of operation** — "agent.eth" sold for 42 ETH (about $148,000) in 2024. Three-digit ENS names have traded at floor prices of 15-28 ETH.
+
+### Expiring names: an even larger attack surface
+
+For *new* names, the attacker must guess which names someone might want. For *expiring* names, the target list is public:
+
+- `nameExpires(id)` is on-chain — anyone can query exact expiry dates for every name
+- A 90-day grace period follows expiry, after which the name becomes available
+- High-value expiring names are trivially enumerable — just query the contract
+
+ENS uses an exponential premium decay (Dutch auction) after the grace period ends — the price starts high and halves each day. This is meant to prevent racing. But the premium is a function of time, identical for everyone at any given block. The attacker pre-commits to the target names and waits for a victim to reveal their registration at whatever premium level they're willing to pay. The attacker frontruns at the same price point. The premium doesn't differentiate between attacker and victim.
+
+### The 3-character bruteforce
+
+ENS requires a minimum of 3 characters. Three-character names cost $640/year to register.
+
+There are 46,656 possible 3-character combinations (`[a-z0-9]^3`). Most are registered or worthless. Filter to unregistered, high-value targets — maybe 500-2,000 names worth maintaining commitments for.
+
+At $8/day for 2,000 commitments, the attacker covers the entire interesting 3-character space. One sniped 3-letter word like "pay.eth" or "buy.eth" eclipses the annual cost by orders of magnitude.
+
+### What this demonstrates
+
+ENS's commit-reveal successfully prevents *reactive* frontrunning — you can't see a commit and guess what's inside. But it's wide open to *preemptive* speculation because:
+
+1. **Zero penalty for unused commitments** — they expire silently
+2. **Low cost** — $0.004 per commitment at off-peak gas
+3. **Predictable targets** — high-value names are obvious, expiring names are public
+4. **No trap** — the attacker never faces a "execute at bad terms or forfeit" dilemma
+
+### The deeper problem: borrowed security
+
+ENS has no on-chain mechanism to control the cost of commitments. Its security against preemptive speculation is implicitly borrowed from SSTORE gas pricing — an external factor the contract doesn't control, didn't choose, and can't adapt to.
+
+This is fragile by design. A contract's security properties should be enforced by the contract itself, not by hoping that infrastructure costs remain high enough to deter abuse. This is already playing out: Ethereum's gas limit doubled from 30M to 60M in 2025, and ENS registration gas costs dropped 99% as a result — with further increases on the roadmap. The contract has no lever to pull.
+
+BondRoute internalizes the cost. Stakes are an explicit, protocol-defined, on-chain enforced constraint — not a side effect of infrastructure pricing. Gas could go to zero and the trap mechanism still works, because the cost of abandonment is the stake, not the gas to create the commitment.
+
+Most deployed commit-reveal schemes also leak structurally relevant information: the contract being interacted with, the sender, and sometimes partial calldata. In ENS, every commitment targets the registrar directly — attackers know you're registering a name before you reveal which one.
+
+BondRoute addresses this. All bonds flow through a singleton contract. At commit time, attackers observe only the commitment hash, the stake token, and the stake amount. The protocol, function, parameters, fundings, and even the bond owner are hidden inside the hash. Any address can create bonds on behalf of others, so even the transaction sender reveals nothing. Combined with binding economics, this closes both the information leakage and the zero-penalty gaps that make traditional commit-reveal exploitable.
 
 ---
 
@@ -186,17 +245,17 @@ For speculation to pay, the profits from winning bonds must exceed the losses fr
 
 ### When Stakes Matter Most
 
-The need for stakes depends on how feasible preemptive bond farming is:
+The need for stakes depends on how feasible preemptive speculation is:
 
 | Factor | Low Risk | High Risk |
 |--------|----------|-----------|
-| **Search space** | Large (unique strings, unpredictable params) | Small (bid amounts, swap sizes) |
-| **Gas costs** | Expensive (Ethereum mainnet during congestion) | Cheap (L2s, low-activity periods) |
+| **Parameter predictability** | Unpredictable (random unique IDs, nonces) | Predictable (swap amounts, bid increments, popular names) |
+| **Commitment cost** | Expensive (Ethereum mainnet during congestion) | Cheap (L2s, multicall batching, off-peak gas) — and trending cheaper as the ecosystem optimizes for scale |
 | **Potential reward** | Low value transactions | High value transactions |
 
-**Large search space:** If parameters are unpredictable (e.g., registering a 10-character username), attackers can't cover the space. Reserved execution alone may suffice.
+**Unpredictable parameters:** If parameters are hard to guess, attackers can't build a useful candidate list. Reserved execution alone may suffice.
 
-**Small search space + cheap gas:** If parameters are guessable (e.g., bid amounts from $100-$10,000) and gas is cheap, attackers can blanket the range with pre-created bonds. Stakes make this unprofitable.
+**Predictable parameters + cheap commitments:** If parameters can be anticipated through heuristics, on-chain analysis, or common sense — and commitment creation is cheap — attackers can pre-create commitments covering the likely range, let 99.9% expire for free, and exploit the 0.1% that match real activity. The ENS case study above demonstrates this concretely: $8/day to maintain 2,000 standing commitments with zero penalty for unused ones. Stakes make this math negative: every expired bond forfeits stake, and the cumulative loss across abandoned bonds exceeds the profit from the few that hit.
 
 Only the protocol knows its economics. BondRoute provides the primitive — protocols define the constraints.
 
@@ -208,51 +267,11 @@ Dynamic constraints (values that change over time) may be acceptable for some us
 
 ---
 
-## Common Misconceptions
-
-### "Commit-reveal doesn't prevent MEV"
-
-Traditional commit-reveal: At reveal, attackers see and frontrun.
-
-BondRoute: At reveal, attackers can't frontrun because protected functions reject unbonded calls — and executing a bond requires waiting blocks after creation. By the time they could act, your transaction already executed. Pre-create bonds speculatively? Protocols can require stakes that make that math negative.
-
-### "Just abandon the bad bonds"
-
-You can't abandon bonds that "succeed" for free. If your params pass validation, you either execute (bad outcome) or forfeit stake.
-
-### "The defense is hiding intent"
-
-Hiding helps, but the real defense is:
-1. Requiring bonds + delay (reserved execution) — blocks reactive frontrunning
-2. Protocol-defined stakes (binding economics) — blocks preemptive speculation
-
-### "Each attempt costs real money"
-
-Imprecise. Failed attempts (slippage exceeded, bid too low) return stake. The cost is in the TRAP — bonds that succeed at bad terms force bad outcomes or forfeit.
-
----
-
 ## Key Terminology
 
 | Term | Meaning |
 |------|---------|
-| **Naked call** | A call to a protected function without a bond. Rejected. |
 | **Bond farming** | Creating multiple bonds to speculate on different outcomes, executing only profitable ones. Unprofitable because trapped bonds force losses. |
-| **Reserved execution** | Protected functions require a bond to execute. |
+| **Reserved execution** | Protected functions reject unbonded calls and enforce a protocol-specified block delay before execution. |
 | **Binding economics** | Fixed params + protocol-defined stakes = no free optionality. |
 | **The trap** | Bonds that "succeed" at unfavorable terms force you to execute a bad outcome or forfeit stake. |
-
----
-
-## Summary
-
-BondRoute doesn't just hide intent. It closes both attack vectors.
-
-1. **Reserved execution** — Can't frontrun reactively. By the time attackers see your intent, they'd need a bond + delay. Too late.
-2. **Binding economics** — Can't speculate preemptively. Protocols can require stakes that make the math negative.
-
-The trap isn't losing stake on abandoned bonds. The trap is being forced to choose between executing a bad trade or forfeiting stake on bonds that technically "succeed."
-
-Honest users are unaffected — they create one bond, execute it, get stake back.
-
-Speculators can't win — covering multiple outcomes means getting trapped on the ones that "succeed" at bad terms.

@@ -155,9 +155,9 @@ Existing solutions don't fix this — they introduce trust assumptions and move 
 
 BondRoute gives your protocol two properties that eliminate these attacks:
 
-**Reserved execution** — Protected functions reject naked calls. Every action requires a bond created in advance. Attackers can't frontrun at reveal — they don't have bonds, and couldn't have known what to bond for.
+**Reserved execution** — Protected functions reject unbonded calls, and bonds can only be executed after a protocol-specified block delay. Attackers can't frontrun at reveal — they don't have bonds, and couldn't have known what to bond for.
 
-**Binding economics** — Bonds lock stake with fixed parameters. Execute to recover stake, or forfeit. Bonds that "succeed" at unfavorable terms trap you: execute a bad trade or lose stake. Bond farming doesn't pay.
+**Binding economics** — Bonds lock explicit, protocol-defined stake. Execute to recover stake, or forfeit. Bonds that "succeed" at unfavorable terms trap you: execute a bad trade or lose stake. Bond farming doesn't pay.
 
 The result: no frontrunning without a bond, and speculating on bonds is unprofitable.
 
