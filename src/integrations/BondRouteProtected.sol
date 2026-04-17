@@ -352,7 +352,7 @@ interface IBondRouteProtected {
      *      Implementations MUST consume below 50,000 gas on all target EVM-compatible chains.
      */
     function BondRoute_get_protected_selectors( )
-    external pure returns ( bytes4[] memory selectors );
+    external view returns ( bytes4[] memory selectors );
 
     /**
      * @notice Optional: provide custom EIP-712 types for better wallet UX
@@ -496,7 +496,7 @@ abstract contract BondRouteProtected is IBondRouteProtected {
      *      }
      */
     function BondRoute_get_protected_selectors( )
-    external pure virtual returns ( bytes4[] memory selectors );
+    external view virtual returns ( bytes4[] memory selectors );
 
 
     /**
@@ -577,7 +577,7 @@ abstract contract BondRouteProtected is IBondRouteProtected {
      *      }
      */
     function BondRoute_get_signing_info( bytes calldata call )
-    external pure virtual returns ( string memory typed_string, bytes32 struct_hash, uint256 TokenAmount_offset )
+    external view virtual returns ( string memory typed_string, bytes32 struct_hash, uint256 TokenAmount_offset )
     {
         call;  // Silence unused parameter warning.
         return ( "", bytes32(0), 0 );
