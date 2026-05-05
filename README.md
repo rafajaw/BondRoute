@@ -776,6 +776,21 @@ Six steps to trustless fair play:
 5. Call `BondRoute_initialize()` at the start of each protected function
 6. Deploy and pin metadata
 
+> [!NOTE]
+> Foundry users may install BondRoute as a lib for local tests.
+>
+> ```bash
+> forge install rafajaw/BondRoute
+> ```
+>
+> Import from the lib instead of keeping a second local copy.
+>
+> ```solidity
+> import { BondRouteProtected } from "BondRoute/integrations/BondRouteProtected.sol";
+> ```
+>
+> Do not mix copied and imported versions in the same compilation graph, because Solidity treats identical structs from different files as different types.
+
 **Automatic discoverability:** Protected contracts announce themselves on-chain upon deployment. Users can immediately find, quote, and start interacting with your protocol.
 
 **Read the code:**

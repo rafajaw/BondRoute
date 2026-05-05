@@ -34,6 +34,10 @@ pragma solidity ^0.8.30;
     7. Use `ctx.pull(token, amount)` to pull user funds
     8. Deploy and pin metadata
 
+    FOUNDRY LIB:
+    If BondRoute is installed as a lib, import this file from the lib instead of copying it locally.
+    Solidity treats identical structs from different files as different types.
+
     No external dependencies. No package manager.
 
     WHAT IT DOES:
