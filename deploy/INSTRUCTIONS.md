@@ -40,6 +40,17 @@ CREATE2 parameters
     Init Code Hash: 0x9edd1f48d88865847863d2fe3c3ebe978856e2ab1fe5a5ad91233d002e549889
 
 
+Pinned artifact
+---------------
+
+The verified Foundry artifact used for the deployed initcode is archived at:
+
+    deploy/artifacts/0xb01d00000000440215e86e0A436f9b59FeB2F14a/BondRoute.sol/
+
+The calldata in `calldata.txt` is generated from that artifact plus the
+constructor argument below.
+
+
 Constructor arguments
 ---------------------
 
