@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import { IERC20, BondRouteProtected, BondContext, BondConstraints, TokenAmount, FundingsLib } from "@BondRouteProtected/BondRouteProtected.sol";
+import { IERC20, BondRouteProtected, BondContext, BondConstraints, TokenAmount, FundingsLib, UnsupportedCall } from "@BondRouteProtected/BondRouteProtected.sol";
 
 /**
  * @title MockBondRouteProtectedContract
@@ -137,7 +137,7 @@ contract MockBondRouteProtectedContract is BondRouteProtected {
             return configured_constraints;
         }
 
-        revert( "Unknown function selector" );
+        revert UnsupportedCall( );
     }
 
     function BondRoute_validate( bytes calldata call, BondContext memory context ) internal view override

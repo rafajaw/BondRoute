@@ -396,6 +396,9 @@ interface IBondRouteProtectedTests {
     function test_initialize_extracts_context() external;
     function test_initialize_only_callable_by_bondroute() external;
 
+    // ─── BondRoute_quote_call() ───────────────────────────────────────────────────
+    function test_quote_call_reverts_with_UnsupportedCall_for_unsupported_call() external;
+
     // ─── BondRoute_validate() ─────────────────────────────────────────────────────
     function test_validate_enforces_min_creation_time() external;
     function test_validate_enforces_max_creation_time() external;
@@ -690,8 +693,8 @@ interface IGasBenchmarkTests {
 // SUMMARY STATISTICS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //
-// Total Tests Declared:      380
-// Implemented & Passing:     380 (✓)
+// Total Tests Declared:      381
+// Implemented & Passing:     381 (✓)
 //
 // Coverage by Contract:
 // - Storage.sol:               100% (24/24)
@@ -701,7 +704,7 @@ interface IGasBenchmarkTests {
 // - Provider.sol:              100% (37/37)
 // - Collector.sol:             100% (25/25)
 // - BondRoute.sol:             100% (18/18)
-// - BondRouteProtected.sol:    100% (35/35)
+// - BondRouteProtected.sol:    100% (36/36)
 // - ReentrancyLock.sol:        100% (20/20)
 // - CrossFunctionReentrancy:   100% (11/11)
 // - ValidationLib.sol:         100% (28/28)

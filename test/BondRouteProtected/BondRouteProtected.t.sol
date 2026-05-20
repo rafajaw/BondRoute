@@ -11,7 +11,7 @@ import { ExecutionData } from "@BondRoute/Core.sol";
 import { TokenAmount, BondConstraints, BondContext, Unauthorized, Range,
          PossiblyBondFarming, InsufficientStake, InvalidStakeToken, InsufficientFunding,
          BondCreatedTooLate, EXECUTION_TOO_SOON, EXECUTION_TOO_LATE, BEFORE_EXECUTION_WINDOW,
-         AFTER_EXECUTION_WINDOW, BONDROUTE_ADDRESS } from "@BondRouteProtected/BondRouteProtected.sol";
+         AFTER_EXECUTION_WINDOW, BONDROUTE_ADDRESS, UnsupportedCall } from "@BondRouteProtected/BondRouteProtected.sol";
 import "@BondRoute/Definitions.sol";
 
 /**
@@ -274,6 +274,15 @@ contract BondRouteProtectedTest is Test {
     }
 
     // ━━━━  BONDROUTE_VALIDATE()  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    function test_quote_call_reverts_with_UnsupportedCall_for_unsupported_call( ) public
+    {
+        TokenAmount[] memory preferred_fundings  =  new TokenAmount[](0);
+        bytes4 selector  =  bytes4(0x12345678);
+
+        vm.expectRevert( UnsupportedCall.selector );
+        mock_protected.BondRoute_quote_call( abi.encodeWithSelector( selector ), weth, preferred_fundings );
+    }
 
     function test_validate_enforces_min_creation_time( ) public
     {

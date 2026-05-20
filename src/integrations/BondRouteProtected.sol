@@ -82,7 +82,7 @@ pragma solidity ^0.8.30;
         function BondRoute_quote_call( bytes calldata call, IERC20, TokenAmount[] memory preferred_fundings )
         public view override returns ( BondConstraints memory constraints )
         {
-            if(  bytes4(call) != this.deposit.selector  )  revert( "Unknown selector" );
+            if(  bytes4(call) != this.deposit.selector  )  revert UnsupportedCall( );
 
             uint256 amount                              =  preferred_fundings[0].amount;
             constraints.min_stake                       =  TokenAmount({ token: DEPOSIT_TOKEN, amount: amount / 100 });  // 1% stake.
@@ -335,8 +335,11 @@ interface IBondRouteProtected {
      * - Returning stakeless constraints enables underpriced optionality.
      *   This may be acceptable for some use-cases, but carries no economic deterrence.
      *
-     * - Malformed constraints (e.g. duplicate funding tokens, fundings with zero amounts) MUST be avoided as they will 
+     * - Malformed constraints (e.g. duplicate funding tokens, fundings with zero amounts) MUST be avoided as they will
      *   cause the bond to be deemed invalid during execution (with subsequent stake refunding).
+     *
+     * - Unsupported calls SHOULD revert with `UnsupportedCall()`. This gives frontends and wallets a uniform
+     *   integration-level error while preserving immutable BondRoute core behavior.
      */
     function BondRoute_quote_call( bytes calldata call, IERC20 preferred_stake_token, TokenAmount[] memory preferred_fundings ) 
     external view returns (BondConstraints memory);
@@ -372,6 +375,8 @@ interface IBondRouteProtected {
      *      - `typed_string` MUST start with: `ExecuteBondAs(TokenAmount[] fundings,TokenAmount stake,uint256 salt,address protocol,`
      *      - `typed_string` MUST contain: `TokenAmount(address token,uint256 amount)`
      *      - `TokenAmount_offset` MUST point to the `T` in that definition
+     *
+     * @dev Unsupported calls SHOULD revert with `UnsupportedCall()`.
      *
      * @dev Example: `ExecuteBondAs(TokenAmount[] fundings,TokenAmount stake,uint256 salt,address protocol,Swap call)Swap(address tokenOut,uint256 minAmountOut)TokenAmount(address token,uint256 amount)`
      */
@@ -412,6 +417,7 @@ error InsufficientStake( uint256 provided, uint256 required );
 error InvalidStakeToken( address provided, address required );
 error InsufficientFunding( address token, uint256 provided, uint256 required );
 error PossiblyBondFarming( string reason, bytes32 additional_info );
+error UnsupportedCall( );
 
 // PossiblyBondFarming reasons - `additional_info` field contains context-specific data:
 string constant EXECUTION_TOO_SOON              =   "Execution too soon";              // additional_info: min delay (uint256)
@@ -532,7 +538,7 @@ abstract contract BondRouteProtected is IBondRouteProtected {
      *      function BondRoute_quote_call( bytes calldata call, IERC20, TokenAmount[] memory preferred_fundings )
      *      public view virtual returns ( BondConstraints memory constraints )
      *      {
-     *          if(  bytes4(call) != this.bid.selector  )  revert( "Selector unknown" );
+     *          if(  bytes4(call) != this.bid.selector  )  revert UnsupportedCall( );
      *
      *          uint256 bid_amount                            =  preferred_fundings[0].amount;
      *          constraints.min_stake                         =  TokenAmount({ token: USDC, amount: bid_amount * 6 / 100 });  // 6% stake.
@@ -569,7 +575,7 @@ abstract contract BondRouteProtected is IBondRouteProtected {
      *      function BondRoute_get_signing_info( bytes calldata call )
      *      external pure override returns ( string memory, bytes32, uint256 )
      *      {
-     *          if(  bytes4(call) != this.swap.selector  )  return ( "", bytes32(0), 0 );
+     *          if(  bytes4(call) != this.swap.selector  )  revert UnsupportedCall( );
      *
      *          ( address tokenOut, uint256 minAmountOut )  =  abi.decode( call[4:], (address, uint256) );
      *          bytes32 struct_hash  =  keccak256( abi.encode(

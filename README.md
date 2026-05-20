@@ -93,7 +93,7 @@ contract YourToken is ERC20, BondRouteProtected {
     function BondRoute_quote_call( bytes calldata call, IERC20, TokenAmount[] memory preferred_fundings )
     public view override returns ( BondConstraints memory constraints )
     {
-        if(  bytes4(call) != this.deposit.selector  )  revert( "Unknown selector" );
+        if(  bytes4(call) != this.deposit.selector  )  revert UnsupportedCall( );
 
         uint256 amount                              =  preferred_fundings[0].amount;
         constraints.min_stake                       =  TokenAmount({ token: DEPOSIT_TOKEN, amount: amount / 100 });  // 1% stake.
@@ -786,7 +786,7 @@ Six steps to trustless fair play:
 > Import from the lib instead of keeping a second local copy.
 >
 > ```solidity
-> import { BondRouteProtected } from "BondRoute/integrations/BondRouteProtected.sol";
+> import "BondRoute/integrations/BondRouteProtected.sol";
 > ```
 >
 > Do not mix copied and imported versions in the same compilation graph, because Solidity treats identical structs from different files as different types.
