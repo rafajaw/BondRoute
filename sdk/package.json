@@ -3,18 +3,30 @@
   "version": "0.0.1",
   "description": "TypeScript SDK for BondRoute — staked commitment bonds for EVM protocols.",
   "type": "module",
-  "main": "./BondRoute.ts",
+  "main": "./dist/BondRoute.js",
+  "module": "./dist/BondRoute.js",
+  "types": "./dist/BondRoute.d.ts",
   "exports": {
-    ".": "./BondRoute.ts"
+    ".": {
+      "types": "./dist/BondRoute.d.ts",
+      "import": "./dist/BondRoute.js",
+      "default": "./dist/BondRoute.js"
+    },
+    "./source": "./BondRoute.ts"
   },
   "files": [
+    "dist",
     "BondRoute.ts",
     "README.md"
   ],
   "scripts": {
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:types": "tsc -p tsconfig.build.json",
+    "build:js": "bun build BondRoute.ts --outdir dist --format esm --external viem",
+    "build": "rm -rf dist && bun run build:types && bun run build:js",
+    "prepublishOnly": "bun run build"
   },
   "peerDependencies": {
     "viem": "^2.0.0"
