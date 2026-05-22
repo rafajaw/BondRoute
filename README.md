@@ -99,7 +99,8 @@ contract YourToken is ERC20, BondRouteProtected {
         constraints.min_stake                       =  TokenAmount({ token: DEPOSIT_TOKEN, amount: amount / 100 });  // 1% stake.
         constraints.min_fundings                    =  new TokenAmount[](1);
         constraints.min_fundings[0]                 =  TokenAmount({ token: DEPOSIT_TOKEN, amount: amount });
-        constraints.min_execution_delay_in_blocks   =  ( block.chainid == 1 )  ?  2  :  3;  // Chain-aware block finality.
+        constraints.min_execution_delay_in_blocks   =  3;        // Block delay.
+        constraints.min_execution_delay_in_seconds  =  2;        // Time delay.
         constraints.max_execution_delay_in_seconds  =  2 hours;  // Sensible security/UX balance.
     }
 
@@ -297,8 +298,9 @@ The return type is `BondConstraints`:
 struct BondConstraints {
     TokenAmount min_stake;                      // Required stake (token + amount)
     TokenAmount[] min_fundings;                 // Required funding tokens (max 4)
-    uint256 min_execution_delay_in_blocks;      // BondRoute enforces 1 - can require more to deter chain reorgs
-    uint256 max_execution_delay_in_seconds;     // Constrains sitting on a bond for opportunistic execution
+    uint256 min_execution_delay_in_blocks;      // Block-based public reveal delay
+    uint256 min_execution_delay_in_seconds;     // Time-based public reveal delay
+    uint256 max_execution_delay_in_seconds;     // Caps sitting on a bond for opportunistic execution
     Range valid_creation_timestamp_range;       // Absolute timestamp window for bond creation
     Range valid_execution_timestamp_range;      // Absolute timestamp window for bond execution
 }
@@ -315,10 +317,13 @@ struct Range {
 |-------|---------|------------|
 | `min_stake` | Required stake (refunded on execution) | No stake required |
 | `min_fundings` | Tokens user must provide | No funding required |
-| `min_execution_delay_in_blocks` | Minimum blocks before execution | BondRoute default (1 block) |
-| `max_execution_delay_in_seconds` | Maximum seconds until execution | BondRoute hardcap (111 days) |
+| `min_execution_delay_in_blocks` | Block-based public reveal delay; useful for ordering durability and reorg resistance | BondRoute default (1 block) |
+| `min_execution_delay_in_seconds` | Time-based public reveal delay; useful on fast-block chains | No seconds floor |
+| `max_execution_delay_in_seconds` | Caps opportunistic execution; must exceed `min_execution_delay_in_seconds` if both are set | BondRoute hardcap (111 days) |
 | `valid_creation_timestamp_range` | Absolute creation window | No creation constraint |
 | `valid_execution_timestamp_range` | Absolute execution window | No execution constraint |
+
+Timing floors are independent and cumulative. Blocks give ordering durability; seconds ensure real elapsed time has passed.
 
 ### Understanding Fundings
 
@@ -354,7 +359,8 @@ Swap 1,000 USDC with 100 USDC stake
 **Liquidation** — minimum delay:
 ```solidity
 constraints.min_stake                        =  TokenAmount({ token: NATIVE_TOKEN, amount: 0.1 ether });  // Fixed stake.
-constraints.min_execution_delay_in_blocks    =  5;  // Ensure finality of bond creation.
+constraints.min_execution_delay_in_blocks    =  5;
+constraints.min_execution_delay_in_seconds   =  2;
 constraints.max_execution_delay_in_seconds   =  1 hours;
 ```
 
@@ -363,6 +369,8 @@ constraints.max_execution_delay_in_seconds   =  1 hours;
 constraints.min_stake                        =  TokenAmount({ token: USDC, amount: amount / 100 });  // 1% stake.
 constraints.min_fundings                     =  new TokenAmount[](1);
 constraints.min_fundings[0]                  =  TokenAmount({ token: USDC, amount: amount });
+constraints.min_execution_delay_in_blocks    =  3;
+constraints.min_execution_delay_in_seconds   =  2;
 constraints.max_execution_delay_in_seconds   =  3 hours;
 ```
 
@@ -371,6 +379,8 @@ constraints.max_execution_delay_in_seconds   =  3 hours;
 constraints.min_stake                        =  TokenAmount({ token: WETH, amount: bid_amount / 10 });  // 10% stake.
 constraints.min_fundings                     =  new TokenAmount[](1);
 constraints.min_fundings[0]                  =  TokenAmount({ token: WETH, amount: bid_amount });
+constraints.min_execution_delay_in_blocks    =  3;
+constraints.min_execution_delay_in_seconds   =  2;
 constraints.valid_creation_timestamp_range   =  Range({ min: auction_start, max: auction_end });  // Bidding window.
 constraints.valid_execution_timestamp_range  =  Range({ min: reveal_start, max: reveal_end });  // Reveal window.
 ```

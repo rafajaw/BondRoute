@@ -10,7 +10,7 @@ import { ProtocolAnnounced } from "@BondRoute/Provider.sol";
 import { ExecutionData } from "@BondRoute/Core.sol";
 import { TokenAmount, BondConstraints, BondContext, Unauthorized, Range,
          PossiblyBondFarming, InsufficientStake, InvalidStakeToken, InsufficientFunding,
-         BondCreatedTooLate, EXECUTION_TOO_SOON, EXECUTION_TOO_LATE, BEFORE_EXECUTION_WINDOW,
+         BondCreatedTooLate, EXECUTION_TOO_SOON_BLOCKS, EXECUTION_TOO_SOON_SECONDS, EXECUTION_TOO_LATE, BEFORE_EXECUTION_WINDOW,
          AFTER_EXECUTION_WINDOW, BONDROUTE_ADDRESS, UnsupportedCall } from "@BondRouteProtected/BondRouteProtected.sol";
 import "@BondRoute/Definitions.sol";
 
@@ -110,9 +110,10 @@ contract BondRouteProtectedTest is Test {
         bytes32 commitment_hash  =  bond_route.__OFF_CHAIN__calc_commitment_hash( USER, execution_data );
 
         vm.prank( USER );
-        bond_route.create_bond( commitment_hash, execution_data.stake);
+        bond_route.create_bond( commitment_hash, execution_data.stake );
 
         vm.roll( block.number + 1 );
+        vm.warp( block.timestamp + 2 );  // Satisfies BondRouteProtected's 1-second floor (+1 tick) for tests that don't gate on timing.
 
         vm.prank( USER );
         return bond_route.execute_bond( execution_data );
@@ -167,6 +168,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 10,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -180,7 +182,7 @@ contract BondRouteProtectedTest is Test {
         vm.roll( block.number + 1 );  // Only 1 block elapsed, but 10 required
 
         vm.prank( USER );
-        vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, EXECUTION_TOO_SOON, bytes32(uint256(10)) ) );
+        vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, EXECUTION_TOO_SOON_BLOCKS, bytes32(uint256(10)) ) );
         bond_route.execute_bond( execution_data );
     }
 
@@ -192,6 +194,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -211,6 +214,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -231,6 +235,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -252,6 +257,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -292,6 +298,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: block.timestamp + 1 hours, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -317,6 +324,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: max_creation_time }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -336,7 +344,7 @@ contract BondRouteProtectedTest is Test {
         mock_protected.BondRoute_entry_point( execution_data.call, context );
     }
 
-    function test_validate_enforces_min_execution_delay( ) public
+    function test_validate_enforces_min_execution_delay_blocks( ) public
     {
         ExecutionData memory execution_data  =  _create_basic_execution_data( );
 
@@ -346,6 +354,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: min_blocks,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -354,22 +363,115 @@ contract BondRouteProtectedTest is Test {
         bytes32 commitment_hash  =  bond_route.__OFF_CHAIN__calc_commitment_hash( USER, execution_data );
 
         vm.prank( USER );
-        bond_route.create_bond( commitment_hash, execution_data.stake);
+        bond_route.create_bond( commitment_hash, execution_data.stake );
 
-        // Sad path: min_blocks - 1 should fail
+        // Sad path: min_blocks - 1 should fail with EXECUTION_TOO_SOON_BLOCKS.
         vm.roll( block.number + min_blocks - 1 );
 
         vm.prank( USER );
-        vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, EXECUTION_TOO_SOON, bytes32(min_blocks) ) );
+        vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, EXECUTION_TOO_SOON_BLOCKS, bytes32(min_blocks) ) );
         bond_route.execute_bond( execution_data );
 
-        // Happy path: exactly min_blocks should pass
+        // Happy path: exactly min_blocks should pass.
         vm.roll( block.number + 1 );
+        vm.warp( block.timestamp + 2 );  // Satisfy the 1-second floor; this test gates on blocks only.
 
         vm.prank( USER );
         ( BondStatus status, ) = bond_route.execute_bond( execution_data );
 
         assertEq( uint(status), uint(BondStatus.EXECUTED), "Should succeed at exactly min_blocks" );
+    }
+
+    function test_validate_enforces_min_execution_delay_seconds( ) public
+    {
+        ExecutionData memory execution_data  =  _create_basic_execution_data( );
+
+        uint256 min_seconds  =  10;
+
+        mock_protected.configure_constraints( BondConstraints({
+            min_stake: TokenAmount({ token: weth, amount: 10e18 }),
+            min_fundings: new TokenAmount[](0),
+            min_execution_delay_in_blocks: 0,                          // *NOTE*  -  Decouples from blocks check; only seconds floor under test.
+            min_execution_delay_in_seconds: min_seconds,
+            max_execution_delay_in_seconds: 0,
+            valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
+            valid_execution_timestamp_range: Range({ min: 0, max: 0 })
+        }));
+
+        bytes32 commitment_hash  =  bond_route.__OFF_CHAIN__calc_commitment_hash( USER, execution_data );
+
+        vm.prank( USER );
+        bond_route.create_bond( commitment_hash, execution_data.stake );
+
+        uint256 creation_time  =  block.timestamp;
+        vm.roll( block.number + 1 );  // Advance one block to satisfy BondRoute core's 1-block minimum.
+
+        // Sad path: exactly min_seconds should fail because EVM timestamps have one-second granularity.
+        vm.warp( creation_time + min_seconds );
+
+        vm.prank( USER );
+        vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, EXECUTION_TOO_SOON_SECONDS, bytes32(min_seconds + 1) ) );
+        bond_route.execute_bond( execution_data );
+
+        // Happy path: min_seconds + 1 guarantees more than min_seconds seconds of timestamp separation.
+        vm.warp( creation_time + min_seconds + 1 );
+
+        vm.prank( USER );
+        ( BondStatus status, ) = bond_route.execute_bond( execution_data );
+
+        assertEq( uint(status), uint(BondStatus.EXECUTED), "Should succeed when timestamp delta exceeds min_seconds" );
+    }
+
+    function test_validate_enforces_min_execution_delay_blocks_and_seconds_independent( ) public
+    {
+        // *NOTE*  -  Proves the two floors are evaluated independently. Progresses forward in both
+        //            block.number and block.timestamp so each phase exercises a single gating constraint:
+        //            (A) blocks short + seconds short → blocks revert fires first
+        //            (B) blocks ok    + seconds short → seconds revert fires
+        //            (C) blocks ok    + seconds ok    → success
+        ExecutionData memory execution_data  =  _create_basic_execution_data( );
+
+        uint256 min_blocks   =  5;
+        uint256 min_seconds  =  30;
+
+        mock_protected.configure_constraints( BondConstraints({
+            min_stake: TokenAmount({ token: weth, amount: 10e18 }),
+            min_fundings: new TokenAmount[](0),
+            min_execution_delay_in_blocks: min_blocks,
+            min_execution_delay_in_seconds: min_seconds,
+            max_execution_delay_in_seconds: 0,
+            valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
+            valid_execution_timestamp_range: Range({ min: 0, max: 0 })
+        }));
+
+        bytes32 commitment_hash  =  bond_route.__OFF_CHAIN__calc_commitment_hash( USER, execution_data );
+
+        vm.prank( USER );
+        bond_route.create_bond( commitment_hash, execution_data.stake );
+
+        uint256 creation_time  =  block.timestamp;
+
+        // Phase A: blocks-short, seconds-short → blocks revert fires (blocks check runs first in _validate_timing).
+        vm.roll( block.number + min_blocks - 1 );
+
+        vm.prank( USER );
+        vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, EXECUTION_TOO_SOON_BLOCKS, bytes32(min_blocks) ) );
+        bond_route.execute_bond( execution_data );
+
+        // Phase B: blocks satisfied, seconds still short → seconds revert fires.
+        vm.roll( block.number + 1 );  // now at min_blocks elapsed
+
+        vm.prank( USER );
+        vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, EXECUTION_TOO_SOON_SECONDS, bytes32(min_seconds + 1) ) );
+        bond_route.execute_bond( execution_data );
+
+        // Phase C: both satisfied → success.
+        vm.warp( creation_time + min_seconds + 1 );
+
+        vm.prank( USER );
+        ( BondStatus status, ) = bond_route.execute_bond( execution_data );
+
+        assertEq( uint(status), uint(BondStatus.EXECUTED), "Should succeed when both floors satisfied" );
     }
 
     function test_validate_enforces_max_execution_delay( ) public
@@ -382,6 +484,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: max_seconds,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -421,6 +524,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: dai, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -433,6 +537,8 @@ contract BondRouteProtectedTest is Test {
             creation_block: block.number,
             creation_timestamp: block.timestamp
         });
+
+        vm.warp( block.timestamp + 2 );  // Pass the 1-second floor so InvalidStakeToken is what fires.
 
         // Should revert with InvalidStakeToken(provided=weth, required=dai)
         vm.prank( address(bond_route) );
@@ -449,6 +555,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 20e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -461,6 +568,8 @@ contract BondRouteProtectedTest is Test {
             creation_block: block.number,
             creation_timestamp: block.timestamp
         });
+
+        vm.warp( block.timestamp + 2 );  // Pass the 1-second floor so InsufficientStake is what fires.
 
         // Should revert with InsufficientStake(provided=10e18, required=20e18)
         vm.prank( address(bond_route) );
@@ -489,6 +598,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: required_fundings,
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -501,6 +611,8 @@ contract BondRouteProtectedTest is Test {
             creation_block: block.number,
             creation_timestamp: block.timestamp
         });
+
+        vm.warp( block.timestamp + 2 );  // Pass the 1-second floor so InsufficientFunding is what fires.
 
         // Should revert with InsufficientFunding(token=usdc, provided=500e6, required=1000e6)
         vm.prank( address(bond_route) );
@@ -529,6 +641,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: required_fundings,
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -541,6 +654,8 @@ contract BondRouteProtectedTest is Test {
             creation_block: block.number,
             creation_timestamp: block.timestamp
         });
+
+        vm.warp( block.timestamp + 2 );  // Pass the 1-second floor so InsufficientFunding is what fires.
 
         // Should revert with InsufficientFunding(token=dai, provided=0, required=1000e18)
         vm.prank( address(bond_route) );
@@ -565,6 +680,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -595,6 +711,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: required_fundings,
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -615,6 +732,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: min_blocks,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -623,12 +741,12 @@ contract BondRouteProtectedTest is Test {
         bytes32 commitment_hash  =  bond_route.__OFF_CHAIN__calc_commitment_hash( USER, execution_data );
 
         vm.prank( USER );
-        bond_route.create_bond( commitment_hash, execution_data.stake);
+        bond_route.create_bond( commitment_hash, execution_data.stake );
 
         vm.roll( block.number + 1 );  // Only 1 block, but 10 required
 
         vm.prank( USER );
-        vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, EXECUTION_TOO_SOON, bytes32(min_blocks) ) );
+        vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, EXECUTION_TOO_SOON_BLOCKS, bytes32(min_blocks) ) );
         bond_route.execute_bond( execution_data );
     }
 
@@ -642,6 +760,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: min_execution_time, max: 0 })
@@ -653,6 +772,7 @@ contract BondRouteProtectedTest is Test {
         bond_route.create_bond( commitment_hash, execution_data.stake);
 
         vm.roll( block.number + 1 );
+        vm.warp( block.timestamp + 2 );  // Pass the 1-second floor so BEFORE_EXECUTION_WINDOW is what fires.
 
         vm.prank( USER );
         vm.expectRevert( abi.encodeWithSelector( PossiblyBondFarming.selector, BEFORE_EXECUTION_WINDOW, bytes32(min_execution_time) ) );
@@ -669,6 +789,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: max_execution_time })
@@ -698,6 +819,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: min_execution_time, max: max_execution_time })
@@ -727,6 +849,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: min_execution_time, max: 0 })
@@ -756,6 +879,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: max_execution_time })
@@ -806,6 +930,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -848,6 +973,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -883,6 +1009,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -918,6 +1045,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -953,6 +1081,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -996,6 +1125,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -1033,6 +1163,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -1069,6 +1200,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })
@@ -1098,6 +1230,7 @@ contract BondRouteProtectedTest is Test {
             min_stake: TokenAmount({ token: weth, amount: 10e18 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })

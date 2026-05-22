@@ -88,7 +88,8 @@ pragma solidity ^0.8.30;
             constraints.min_stake                       =  TokenAmount({ token: DEPOSIT_TOKEN, amount: amount / 100 });  // 1% stake.
             constraints.min_fundings                    =  new TokenAmount[](1);
             constraints.min_fundings[0]                 =  TokenAmount({ token: DEPOSIT_TOKEN, amount: amount });
-            constraints.min_execution_delay_in_blocks   =  ( block.chainid == 1 )  ?  2  :  3;  // Chain-aware block finality.
+            constraints.min_execution_delay_in_blocks   =  3;        // Durable chain ordering: public reveal delay and reorg-depth floor.
+            constraints.min_execution_delay_in_seconds  =  2;        // Real elapsed-time floor for fast-block environments.
             constraints.max_execution_delay_in_seconds  =  2 hours;  // Sensible security/UX balance.
         }
 
@@ -128,8 +129,9 @@ struct BondContext {
 struct BondConstraints {
     TokenAmount min_stake;
     TokenAmount[] min_fundings;
-    uint256 min_execution_delay_in_blocks;        // BondRoute enforces 1 - can require more to deter chain reorgs.
-    uint256 max_execution_delay_in_seconds;       // Constrains sitting on a bond for opportunistic execution.
+    uint256 min_execution_delay_in_blocks;
+    uint256 min_execution_delay_in_seconds;
+    uint256 max_execution_delay_in_seconds;
     Range valid_creation_timestamp_range;
     Range valid_execution_timestamp_range;
 }
@@ -312,12 +314,22 @@ interface IBondRouteProtected {
      *   - All returned entries are required simultaneously
      *
      * FIELD: min_execution_delay_in_blocks
-     *   - Minimum blocks from creation before execution allowed (reorg protection)
-     *   - BondRoute enforces 1 block minimum; use this to require more
+     *   - Minimum blocks elapsed between bond creation and execution.
+     *   - Expresses durable chain ordering: the bond must exist for a protocol-defined number of blocks before reveal/execution.
+     *   - Provides chain-native public reveal delay and reorg-depth resistance.
+     *   - BondRoute enforces 1 block minimum; set higher for stricter public reveal delay or deeper reorg resistance.
+     *
+     * FIELD: min_execution_delay_in_seconds
+     *   - Minimum seconds elapsed between bond creation and execution.
+     *   - Expresses real elapsed time, independently from block count.
+     *   - Complements the block delay when blocks may be produced too quickly to provide enough public reveal delay.
+     *   - For adversarial public execution, configure both dimensions instead of treating either one as a proxy for the other.
      *
      * FIELD: max_execution_delay_in_seconds
-     *   - Maximum seconds from creation to execute (constrains opportunistic execution)
-     *   - BondRoute enforces 111 days maximum; use this to require less
+     *   - Maximum seconds from creation to execute.
+     *   - Constrains sitting on a bond and waiting for favorable conditions before executing.
+     *   - If set with `min_execution_delay_in_seconds`, it must leave a valid execution range.
+     *   - BondRoute enforces 111 days maximum; set lower to tighten
      *
      * FIELD: valid_creation_timestamp_range
      *   - Absolute creation window
@@ -420,8 +432,9 @@ error PossiblyBondFarming( string reason, bytes32 additional_info );
 error UnsupportedCall( );
 
 // PossiblyBondFarming reasons - `additional_info` field contains context-specific data:
-string constant EXECUTION_TOO_SOON              =   "Execution too soon";              // additional_info: min delay (uint256)
-string constant EXECUTION_TOO_LATE              =   "Execution too late";              // additional_info: max delay (uint256)
+string constant EXECUTION_TOO_SOON_BLOCKS       =   "Execution too soon (blocks)";     // additional_info: min delay in blocks (uint256)
+string constant EXECUTION_TOO_SOON_SECONDS      =   "Execution too soon (seconds)";    // additional_info: required block.timestamp delta in seconds (uint256)
+string constant EXECUTION_TOO_LATE              =   "Execution too late";              // additional_info: max delay in seconds (uint256)
 string constant BEFORE_EXECUTION_WINDOW         =   "Before execution window";         // additional_info: min execution time (uint256)
 string constant AFTER_EXECUTION_WINDOW          =   "After execution window";          // additional_info: max execution time (uint256)
 
@@ -523,8 +536,9 @@ abstract contract BondRouteProtected is IBondRouteProtected {
      * It may include:
      *   - required stake (token + amount)
      *   - required fundings
-     *   - minimum blocks to execute (reorg protection)
-     *   - maximum seconds to execute (bounds optionality)
+     *   - minimum blocks to execute (durable chain ordering: public reveal delay + reorg-depth resistance)
+     *   - minimum seconds to execute (real elapsed-time public reveal delay)
+     *   - maximum seconds to execute (optionality / stale execution cap)
      *   - absolute creation timestamp range
      *   - absolute execution timestamp range
      *
@@ -544,7 +558,8 @@ abstract contract BondRouteProtected is IBondRouteProtected {
      *          constraints.min_stake                         =  TokenAmount({ token: USDC, amount: bid_amount * 6 / 100 });  // 6% stake.
      *          constraints.min_fundings                      =  new TokenAmount[](1);
      *          constraints.min_fundings[0]                   =  TokenAmount({ token: USDC, amount: bid_amount });
-     *          constraints.min_execution_delay_in_blocks     =  3;  // Reorg protection.
+     *          constraints.min_execution_delay_in_blocks     =  3;  // Durable chain ordering: public reveal delay and reorg-depth floor.
+     *          constraints.min_execution_delay_in_seconds    =  2;  // Real elapsed-time floor for fast-block environments.
      *          constraints.valid_creation_timestamp_range    =  Range({ min: BID_START, max: BID_END });
      *          constraints.valid_execution_timestamp_range   =  Range({ min: REVEAL_START, max: REVEAL_END });
      *      }
@@ -719,14 +734,36 @@ abstract contract BondRouteProtected is IBondRouteProtected {
             revert BondCreatedTooLate({ created_at: context.creation_timestamp, max_creation_time: constraints.valid_creation_timestamp_range.max });
         }
 
-        // Validate minimum blocks elapsed since creation (reorg protection).
+        // Validate minimum blocks elapsed since creation (durable chain ordering: public reveal delay + reorg-depth resistance).
         if(  constraints.min_execution_delay_in_blocks > 0  )
         {
             uint blocks_elapsed;
             unchecked {  blocks_elapsed  =  block.number - context.creation_block;  }
             if(  blocks_elapsed < constraints.min_execution_delay_in_blocks  )
             {
-                revert PossiblyBondFarming({ reason: EXECUTION_TOO_SOON, additional_info: bytes32(constraints.min_execution_delay_in_blocks) });
+                revert PossiblyBondFarming({ reason: EXECUTION_TOO_SOON_BLOCKS, additional_info: bytes32(constraints.min_execution_delay_in_blocks) });
+            }
+        }
+
+        // Validate minimum timestamp seconds elapsed since creation (real elapsed-time public reveal delay).
+        {
+            uint required_seconds_elapsed;
+            uint seconds_elapsed;
+            unchecked
+            {
+                // *SECURITY*  -  Floor of 1 second is always enforced (no opt-out), mirroring the 1-block floor BondRoute core enforces on the block dimension.
+                //                Closes the footgun where a protocol on a fast-block chain forgets to configure this and gets no real-time public reveal delay.
+                uint configured_seconds   =  (  constraints.min_execution_delay_in_seconds == 0  )  ?  1  :  constraints.min_execution_delay_in_seconds;
+
+                // *SECURITY*  -  Add one timestamp tick because EVM timestamps have one-second granularity. On fast-block chains,
+                //                two blocks with timestamps one second apart may have been produced only milliseconds apart across a second boundary.
+                required_seconds_elapsed  =  configured_seconds + 1;
+
+                seconds_elapsed           =  block.timestamp - context.creation_timestamp;
+            }
+            if(  seconds_elapsed < required_seconds_elapsed  )
+            {
+                revert PossiblyBondFarming({ reason: EXECUTION_TOO_SOON_SECONDS, additional_info: bytes32(required_seconds_elapsed) });
             }
         }
 

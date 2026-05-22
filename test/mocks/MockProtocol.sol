@@ -108,6 +108,7 @@ contract MockProtocol is IBondRouteProtected {
             min_stake: TokenAmount({ token: IERC20(address(0)), amount: 0 }),
             min_fundings: new TokenAmount[](0),
             min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
             max_execution_delay_in_seconds: 0,
             valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
             valid_execution_timestamp_range: Range({ min: 0, max: 0 })

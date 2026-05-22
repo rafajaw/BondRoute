@@ -402,7 +402,9 @@ interface IBondRouteProtectedTests {
     // ─── BondRoute_validate() ─────────────────────────────────────────────────────
     function test_validate_enforces_min_creation_time() external;
     function test_validate_enforces_max_creation_time() external;
-    function test_validate_enforces_min_execution_delay() external;
+    function test_validate_enforces_min_execution_delay_blocks() external;
+    function test_validate_enforces_min_execution_delay_seconds() external;
+    function test_validate_enforces_min_execution_delay_blocks_and_seconds_independent() external;
     function test_validate_enforces_max_execution_delay() external;
     function test_validate_enforces_min_execution_time() external;
     function test_validate_enforces_max_execution_time() external;
@@ -693,8 +695,8 @@ interface IGasBenchmarkTests {
 // SUMMARY STATISTICS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //
-// Total Tests Declared:      381
-// Implemented & Passing:     381 (✓)
+// Total Tests Declared:      383
+// Implemented & Passing:     383 (✓)
 //
 // Coverage by Contract:
 // - Storage.sol:               100% (24/24)
@@ -704,7 +706,7 @@ interface IGasBenchmarkTests {
 // - Provider.sol:              100% (37/37)
 // - Collector.sol:             100% (25/25)
 // - BondRoute.sol:             100% (18/18)
-// - BondRouteProtected.sol:    100% (36/36)
+// - BondRouteProtected.sol:    100% (38/38)
 // - ReentrancyLock.sol:        100% (20/20)
 // - CrossFunctionReentrancy:   100% (11/11)
 // - ValidationLib.sol:         100% (28/28)
