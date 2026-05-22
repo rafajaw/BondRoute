@@ -454,8 +454,10 @@ const bond  =  await bondRoute.prepare({
 > Salt sizing: use 32-bit (~4 billion) so it remains brute-forceable in minutes if storage is lost but the rest of `execution_data` survives. Use 256-bit only if secrecy is paramount.
 
 ```typescript
-const { status, output }  =  await bond.dispatch( );
+await bond.dispatch( );
 // Stake refunded on execution (success or graceful revert).
+// Read bond.status to discriminate: "executed" / "protocol_reverted" / "invalid_bond".
+// Settlement payload is on the bond: execution_logs / revert_output / invalid_reason.
 ```
 
 `dispatch( )` refreshes chain state, checks balances, submits missing ERC20 approvals, creates the bond, waits until it is executable, then executes it. If approvals should be user-confirmed by your app instead of auto-submitted, call `bond.dispatch({ auto_approve: false })` and handle `NeedsApprovalError`.

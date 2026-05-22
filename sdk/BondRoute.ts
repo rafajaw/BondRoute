@@ -29,10 +29,12 @@ import {
     type Address,
     type Chain,
     type Hex,
+    type Log,
     type PublicClient,
     type WalletClient,
     decodeAbiParameters,
     decodeErrorResult,
+    decodeEventLog,
     hashTypedData,
 } from "viem";
 
@@ -104,8 +106,16 @@ export type ExecutionData = {
 /**
  * Plain-data shape of a bond record. The `Bond` class wraps this with SDK-aware methods.
  *
- * `state` tracks lifecycle. `*_tx_hash` / `*_tx_nonce` are stored so a stuck tx can be
- * replaced with a higher-gas resend at the same nonce via `bond.bump_create()` / `bond.bump_execute()`.
+ * `state` tracks lifecycle. `status` is the settlement discriminator — switch on it after
+ * `bond.dispatch()` resolves. Settlement payload fields (`execution_logs`, `revert_output`,
+ * `invalid_reason`) are always present and only meaningful when the matching `status` is set:
+ *
+ *   status === "executed"          → `execution_logs` contains the receipt's full log list.
+ *   status === "protocol_reverted" → `revert_output` contains the bytes from BondProtocolReverted.
+ *   status === "invalid_bond"      → `invalid_reason` contains the string from BondValidationFailed.
+ *
+ * `*_tx_hash` / `*_tx_nonce` are stored so a stuck tx can be replaced with a higher-gas resend
+ * at the same nonce via `bond.bump_create()` / `bond.bump_execute()`.
  */
 type BondRecord = {
     schema_version: 1;
@@ -115,6 +125,7 @@ type BondRecord = {
     execution_data: ExecutionData;
     commitment_hash: Hex;
     state: BondState;
+    status: BondStatus;
 
     create_tx_hash?: Hex;
     create_tx_nonce?: number;
@@ -126,7 +137,10 @@ type BondRecord = {
     execute_tx_hash?: Hex;
     execute_tx_nonce?: number;
 
-    status?: BondStatus;
+    execution_logs: Log[];
+    revert_output: Hex;
+    invalid_reason: string;
+
     updated_at_block?: bigint;
 };
 
@@ -142,12 +156,6 @@ export type BondState =
 export type BondStatus = "active" | "executed" | "invalid_bond" | "protocol_reverted" | "liquidated";
 export type BondChainState = "unknown" | "missing" | "found";
 export type TxStatus = "missing" | "pending" | "mined" | "failed";
-
-export type DispatchResult = {
-    status: Exclude<BondStatus, "active">;
-    output: Hex;
-    bond: Bond;
-};
 
 export type BondrouteSdkErrorKind =
     | "contract_error"
@@ -351,6 +359,10 @@ function bond_record_to_plain( bond: BondRecord ): unknown
         execution_data:     execution_data_to_plain( bond.execution_data ),
         commitment_hash:    bond.commitment_hash,
         state:              bond.state,
+        status:             bond.status,
+        execution_logs:     logs_to_plain( bond.execution_logs ),
+        revert_output:      bond.revert_output,
+        invalid_reason:     bond.invalid_reason,
         create_tx_hash:     bond.create_tx_hash,
         create_tx_nonce:    bond.create_tx_nonce,
         creation_block:     bigint_to_plain( bond.creation_block ),
@@ -358,7 +370,6 @@ function bond_record_to_plain( bond: BondRecord ): unknown
         constraints:        bond.constraints  ?  constraints_to_plain( bond.constraints )  :  undefined,
         execute_tx_hash:    bond.execute_tx_hash,
         execute_tx_nonce:   bond.execute_tx_nonce,
-        status:             bond.status,
         updated_at_block:   bigint_to_plain( bond.updated_at_block ),
     };
 }
@@ -378,6 +389,10 @@ function plain_to_bond_record( o: any, context?: { chain_id?: bigint, bondroute?
         execution_data:     plain_to_execution_data( o.execution_data ),
         commitment_hash:    o.commitment_hash,
         state:              migrated_state.state,
+        status:             ( o.status ?? migrated_state.status ?? "active" ) as BondStatus,
+        execution_logs:     plain_to_logs( o.execution_logs ),
+        revert_output:      ( o.revert_output ?? "0x" ) as Hex,
+        invalid_reason:     o.invalid_reason ?? "",
         create_tx_hash:     o.create_tx_hash,
         create_tx_nonce:    o.create_tx_nonce,
         creation_block:     plain_to_bigint( o.creation_block ),
@@ -385,9 +400,27 @@ function plain_to_bond_record( o: any, context?: { chain_id?: bigint, bondroute?
         constraints:        o.constraints  ?  plain_to_constraints( o.constraints )  :  undefined,
         execute_tx_hash:    o.execute_tx_hash,
         execute_tx_nonce:   o.execute_tx_nonce,
-        status:             o.status ?? migrated_state.status,
         updated_at_block:   plain_to_bigint( o.updated_at_block ),
     };
+}
+
+function logs_to_plain( logs: Log[] ): unknown[]
+{
+    return logs.map(( log ) => ({
+        ...log,
+        blockNumber:      log.blockNumber      === null || log.blockNumber      === undefined  ?  log.blockNumber      :  toHex( log.blockNumber as bigint ),
+        transactionIndex: log.transactionIndex,
+        logIndex:         log.logIndex,
+    }));
+}
+
+function plain_to_logs( o: any ): Log[]
+{
+    if(  ! Array.isArray( o )  )  return [];
+    return o.map(( log: any ) => ({
+        ...log,
+        blockNumber: log.blockNumber === null || log.blockNumber === undefined  ?  log.blockNumber  :  BigInt( log.blockNumber ),
+    })) as Log[];
 }
 
 function migrate_state( state: string, create_tx_hash?: Hex ): { state: BondState, status?: BondStatus }
@@ -573,6 +606,27 @@ export class Bond {
     execution_data: ExecutionData;
     commitment_hash: Hex;
     state: BondState;
+
+    /**
+     * Settlement discriminator. Read after `await bond.dispatch()` and switch over it.
+     *
+     *   case "active":            // not yet settled (pre-dispatch or in-flight).
+     *   case "executed":          // bond.execution_logs contains the protocol's emitted events.
+     *   case "protocol_reverted": // bond.revert_output contains the revert bytes.
+     *   case "invalid_bond":      // bond.invalid_reason contains the failure string.
+     *   case "liquidated":        // collector claimed expired stake; observed post-expiry only.
+     */
+    status: BondStatus;
+
+    /** Receipt logs from the successful `execute_bond` tx. Populated iff `status === "executed"`; `[]` otherwise. */
+    execution_logs: Log[];
+
+    /** Bytes from `BondProtocolReverted`. Populated iff `status === "protocol_reverted"`; `"0x"` otherwise. */
+    revert_output: Hex;
+
+    /** String from `BondValidationFailed`. Populated iff `status === "invalid_bond"`; `""` otherwise. */
+    invalid_reason: string;
+
     create_tx_hash?: Hex;
     create_tx_nonce?: number;
     creation_block?: bigint;
@@ -580,7 +634,6 @@ export class Bond {
     constraints?: BondConstraints;
     execute_tx_hash?: Hex;
     execute_tx_nonce?: number;
-    status?: BondStatus;
     updated_at_block?: bigint;
     confirmations?: number;
     chain_state: BondChainState;
@@ -603,6 +656,10 @@ export class Bond {
         this.execution_data       =  data.execution_data;
         this.commitment_hash      =  data.commitment_hash;
         this.state                =  data.state;
+        this.status               =  data.status ?? "active";
+        this.execution_logs       =  data.execution_logs ?? [];
+        this.revert_output        =  data.revert_output  ?? "0x";
+        this.invalid_reason       =  data.invalid_reason ?? "";
         this.create_tx_hash       =  data.create_tx_hash;
         this.create_tx_nonce      =  data.create_tx_nonce;
         this.creation_block       =  data.creation_block;
@@ -610,7 +667,6 @@ export class Bond {
         this.constraints          =  data.constraints;
         this.execute_tx_hash      =  data.execute_tx_hash;
         this.execute_tx_nonce     =  data.execute_tx_nonce;
-        this.status               =  data.status;
         this.updated_at_block     =  data.updated_at_block;
         this.chain_state          =  "unknown";
         this.create_tx_status     =  data.create_tx_hash  ?  "pending"  :  "missing";
@@ -622,13 +678,16 @@ export class Bond {
      *
      * Looks at `this.state` and any persisted tx hashes to pick up exactly where the bond left off.
      * Safe to call on a freshly-constructed bond, a recovered bond, or a partially-dispatched bond.
+     *
+     * Settlement is exposed via mutation, not a return value: read `bond.status` after the await,
+     * then `bond.execution_logs` / `bond.revert_output` / `bond.invalid_reason` for the matching payload.
      */
-    async dispatch( opts?: ResumeOpts ): Promise<DispatchResult>
+    async dispatch( opts?: ResumeOpts ): Promise<this>
     {
         return await this.resume( opts );
     }
 
-    async resume( opts?: ResumeOpts ): Promise<DispatchResult>
+    async resume( opts?: ResumeOpts ): Promise<this>
     {
         const throw_on_missing  =  opts?.auto_approve === false;
 
@@ -636,7 +695,7 @@ export class Bond {
         if(  this.state === "settled"  )
         {
             await this.#sdk._maybe_forget( this );
-            return { status: ( this.status ?? "executed" ) as DispatchResult[ "status" ], output: "0x", bond: this };
+            return this;
         }
         if(  this.expired  )  throw new BondExpiredError({ bond: this.commitment_hash });
 
@@ -668,10 +727,10 @@ export class Bond {
     async wait_until_executable(): Promise<this>              {  await this.#sdk._wait_until_executable( this );  return this;  }
 
     /** Submit `execute_bond`, persist, wait for mining, clear from storage. Gas-multiplier 1.5× by default. */
-    async execute( opts?: GasOpts ): Promise<DispatchResult>      {  return await this.#sdk._execute_tx(       this, opts );  }
+    async execute( opts?: GasOpts ): Promise<this>             {  await this.#sdk._execute_tx(       this, opts );  return this;  }
 
     /** Replace a stuck execute tx at the same nonce with higher gas (2.0× by default). */
-    async bump_execute( opts?: GasOpts ): Promise<DispatchResult> {  return await this.#sdk._bump_execute_tx(  this, opts );  }
+    async bump_execute( opts?: GasOpts ): Promise<this>        {  await this.#sdk._bump_execute_tx(  this, opts );  return this;  }
 
     async get_missing_approvals(): Promise<Approval[]>           {  return await this.#sdk._get_missing_approvals( this );  }
 
@@ -695,9 +754,10 @@ export class Bond {
 
     async build_execution_typed_data(): Promise<ExecuteBondTypedData> {  return await this.#sdk._build_execution_typed_data( this );  }
 
-    async execute_as( signature: Hex, opts?: GasOpts & { relayer_account?: Account | Address, is_eip1271?: boolean } ): Promise<DispatchResult>
+    async execute_as( signature: Hex, opts?: GasOpts & { relayer_account?: Account | Address, is_eip1271?: boolean } ): Promise<this>
     {
-        return await this.#sdk._execute_as_tx( this, signature, opts );
+        await this.#sdk._execute_as_tx( this, signature, opts );
+        return this;
     }
 
     /** Serialize to portable JSON (hex-encoded bigints). The #sdk reference is automatically omitted. */
@@ -938,7 +998,7 @@ export class BondRoute {
     }
 
     /** Shortcut for `bondRoute.bond(...).dispatch()`. */
-    async dispatch( execution_data: ExecutionData, constraints?: BondConstraints ): Promise<DispatchResult>
+    async dispatch( execution_data: ExecutionData, constraints?: BondConstraints ): Promise<Bond>
     {
         return await this.bond( execution_data, constraints ).dispatch();
     }
@@ -1101,7 +1161,7 @@ export class BondRoute {
     }
 
     /** @internal — drives bond.execute() */
-    async _execute_tx( bond: Bond, opts?: GasOpts ): Promise<DispatchResult>
+    async _execute_tx( bond: Bond, opts?: GasOpts ): Promise<void>
     {
         if(  bond.state !== "created"  )  throw new NotExecutableYetError({ state: bond.state });
 
@@ -1114,11 +1174,11 @@ export class BondRoute {
         bond.execute_tx_nonce  =  nonce;
         await this._save( bond );
 
-        return await this._finalize_execute( bond, tx_hash );
+        await this._finalize_execute( bond, tx_hash );
     }
 
     /** @internal — drives bond.bump_execute() */
-    async _bump_execute_tx( bond: Bond, opts?: GasOpts ): Promise<DispatchResult>
+    async _bump_execute_tx( bond: Bond, opts?: GasOpts ): Promise<void>
     {
         if(  bond.state !== "executing" && bond.state !== "created"  )  throw new NotExecutableYetError({ state: bond.state });
         if(  bond.execute_tx_hash === undefined  ||  bond.execute_tx_nonce === undefined  )
@@ -1129,7 +1189,8 @@ export class BondRoute {
         const existing  =  await this._try_get_receipt( bond.execute_tx_hash );
         if(  existing  )
         {
-            return await this._finalize_execute( bond, bond.execute_tx_hash );
+            await this._finalize_execute( bond, bond.execute_tx_hash );
+            return;
         }
 
         const fees    =  await this._estimate_fees( opts?.gas_multiplier ?? this.default_bump_multiplier );
@@ -1137,7 +1198,7 @@ export class BondRoute {
         bond.execute_tx_hash  =  tx_hash;
         await this._save( bond );
 
-        return await this._finalize_execute( bond, tx_hash );
+        await this._finalize_execute( bond, tx_hash );
     }
 
 
@@ -1405,7 +1466,7 @@ export class BondRoute {
         return typed_data;
     }
 
-    async _execute_as_tx( bond: Bond, signature: Hex, opts?: GasOpts & { relayer_account?: Account | Address, is_eip1271?: boolean } ): Promise<DispatchResult>
+    async _execute_as_tx( bond: Bond, signature: Hex, opts?: GasOpts & { relayer_account?: Account | Address, is_eip1271?: boolean } ): Promise<void>
     {
         if(  bond.state !== "created" && bond.state !== "executing"  )  throw new NotExecutableYetError({ state: bond.state });
         bond.state = "executing";
@@ -1430,7 +1491,7 @@ export class BondRoute {
         bond.execute_tx_hash   =  tx_hash;
         bond.execute_tx_nonce  =  nonce;
         await this._save( bond );
-        return await this._finalize_execute( bond, tx_hash );
+        await this._finalize_execute( bond, tx_hash );
     }
 
     async _refresh( bond: Bond ): Promise<void>
@@ -1521,7 +1582,6 @@ export class BondRoute {
         bond.execute_tx_status  =  execute_tx_status;
 
         bond.chain_state = "unknown";
-        bond.status      = undefined;
         try
         {
             const info  =  await this.public_client.readContract({
@@ -1640,32 +1700,65 @@ export class BondRoute {
         await this._save( bond );
     }
 
-    private async _finalize_execute( bond: Bond, tx_hash: Hex ): Promise<DispatchResult>
+    private async _finalize_execute( bond: Bond, tx_hash: Hex ): Promise<void>
     {
         const receipt  =  await this.public_client.waitForTransactionReceipt({ hash: tx_hash });
         if(  receipt.status !== "success"  )  throw new InvalidBondError( `execute_bond tx reverted (hash: ${ tx_hash })` );
 
-        // execute_bond returns (uint8 status, bytes output) but the receipt doesn't carry return data,
-        // so we replay as a simulation against the block just before for decoding.
-        // *NOTE* — first-version simplification; production can decode from BondExecuted/BondProtocolReverted events.
-        const sim  =  await this.public_client.simulateContract({
-            address:      this.bondroute_address,
-            abi:          BONDROUTE_ABI,
-            functionName: "execute_bond",
-            args:         [ bond.execution_data ],
-            blockNumber:  receipt.blockNumber - 1n,
-            account:      bond.user,
-        });
-        const [ status_idx, output ]  =  sim.result as [ number, Hex ];
-        const status_str  =  ( BOND_STATUS[ status_idx ] ?? "executed" ) as DispatchResult[ "status" ];
+        const all_logs: Log[]  =  ( receipt.logs ?? [] ) as Log[];
+        const settlement       =  this._decode_settlement_from_logs( bond, all_logs );
 
-        bond.state           =  "settled";
-        bond.status          =  status_str;
-        bond.updated_at_block  =  receipt.blockNumber;
+        bond.state              =  "settled";
+        bond.status             =  settlement.status;
+        bond.execution_logs     =  settlement.execution_logs;
+        bond.revert_output      =  settlement.revert_output;
+        bond.invalid_reason     =  settlement.invalid_reason;
+        bond.updated_at_block   =  receipt.blockNumber;
+
         await this._save( bond );
         await this._maybe_forget( bond );
+    }
 
-        return { status: status_str, output, bond };
+    /**
+     * Walks the receipt logs for a `BondExecuted`, `BondProtocolReverted`, or `BondValidationFailed`
+     * matching this bond's commitment hash. Exactly one is emitted per successful `execute_bond` tx.
+     * On the `executed` path, the full receipt log list is exposed for protocol-side event decoding.
+     */
+    private _decode_settlement_from_logs( bond: Bond, logs: Log[] ): { status: BondStatus, execution_logs: Log[], revert_output: Hex, invalid_reason: string }
+    {
+        const bondroute_addr   =  this.bondroute_address.toLowerCase();
+        const commitment_hash  =  bond.commitment_hash.toLowerCase();
+
+        for(  const log of logs  )
+        {
+            if(  log.address.toLowerCase() !== bondroute_addr  )  continue;
+            if(  ( log.topics[1] ?? "" ).toLowerCase() !== commitment_hash  )  continue;
+
+            let decoded: { eventName: string, args: any };
+            try
+            {
+                decoded  =  decodeEventLog({ abi: BONDROUTE_ABI, data: log.data, topics: log.topics }) as any;
+            }
+            catch
+            {
+                continue;
+            }
+
+            if(  decoded.eventName === "BondExecuted"  )
+            {
+                return { status: "executed",          execution_logs: logs, revert_output: "0x",                                invalid_reason: "" };
+            }
+            if(  decoded.eventName === "BondProtocolReverted"  )
+            {
+                return { status: "protocol_reverted", execution_logs: [],   revert_output: decoded.args.call_output as Hex,     invalid_reason: "" };
+            }
+            if(  decoded.eventName === "BondValidationFailed"  )
+            {
+                return { status: "invalid_bond",      execution_logs: [],   revert_output: "0x",                                invalid_reason: decoded.args.reason as string };
+            }
+        }
+
+        throw new InvalidBondError( `execute_bond receipt has no settlement event for commitment ${ bond.commitment_hash } (scanned ${ logs.length } logs).` );
     }
 }
 

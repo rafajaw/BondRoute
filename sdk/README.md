@@ -42,8 +42,17 @@ const bond  =  await bondRoute.prepare({
     preferred_fundings: [{ token: USDC, amount: 1000_000_000n }],
 });
 
-const { status, output }  =  await bond.dispatch( );
+await bond.dispatch( );
+
+switch(  bond.status  )
+{
+    case "executed":          // bond.execution_logs contains every log from the execute_bond tx — decode against your protocol's ABI.
+    case "protocol_reverted": // bond.revert_output contains the revert bytes — pass to BondRoute.decode_protocol_revert.
+    case "invalid_bond":      // bond.invalid_reason contains the validation failure reason.
+}
 ```
+
+Settlement is exposed via mutation, not a return value. `await bond.dispatch( )` resolves once the bond reaches a terminal state — successful execution, graceful protocol revert, or validation failure. None of those throw; switch on `bond.status` to discriminate, then read the matching payload field.
 
 `bondRoute.bond( execution_data )` and `bondRoute.dispatch( execution_data )` remain available as advanced escape hatches when you already have quoted constraints.
 
@@ -172,7 +181,8 @@ If you need to interleave logic between create / wait / execute (e.g., relayer f
 const bond  =  bondRoute.bond( execution_data );    // construct (no tx)
 await bond.create( );                                 // submit create, wait for mining, persist
 await bond.wait_until_executable( );                  // blocks until floors satisfied
-const result  =  await bond.execute( );               // submit execute, settle, auto-forget after confirmation threshold
+await bond.execute( );                                // submit execute, settle, auto-forget after confirmation threshold
+// Read bond.status and the matching settlement payload field (execution_logs / revert_output / invalid_reason).
 ```
 
 ## Relayer execution
@@ -187,7 +197,8 @@ const serialized_bond  =  bond.serialize( );
 const relayer_bond  =  relayerBondRoute.deserialize_bond( serialized_bond );
 await relayer_bond.create( );
 await relayer_bond.wait_until_executable( );
-const result  =  await relayer_bond.execute_as( signature );
+await relayer_bond.execute_as( signature );
+// Read relayer_bond.status and the matching settlement payload field.
 ```
 
 The relayer creates the bond and pays execution gas. If the stake is native, `create( )` sends the required `msg.value`; if the stake is ERC20, the relayer must approve BondRoute for the stake token. User fundings are still pulled from the signed user during `execute_as( )`, so user ERC20 funding approvals must exist before execution.
@@ -240,7 +251,7 @@ The relayer creates the bond and pays execution gas. If the stake is native, `cr
 |---|---|
 | `BondRoute.calc_commitment_hash({ user, chain_id, execution_data, bondroute_address? })` | Pure hash with explicit context. `bondroute_address` is only for tests/forks/custom deployments. |
 | `BondRoute.hash_fundings( fundings )` | Pure: keccak256 of the packed fundings array. |
-| `BondRoute.decode_protocol_revert( output, protocol_abi )` | Decode protocol revert bytes (from `DispatchResult.output` when `status === "protocol_reverted"`) against the protocol's ABI. Returns `{ name, args } \| null`. |
+| `BondRoute.decode_protocol_revert( output, protocol_abi )` | Decode protocol revert bytes (from `bond.revert_output` when `bond.status === "protocol_reverted"`) against the protocol's ABI. Returns `{ name, args } \| null`. |
 
 ## Errors
 

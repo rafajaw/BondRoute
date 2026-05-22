@@ -7,7 +7,7 @@
 // forever; no regeneration story needed.
 
 import { describe, test, expect } from "bun:test";
-import { encodeAbiParameters, encodeErrorResult, hashTypedData, keccak256, parseAbi, toHex } from "viem";
+import { encodeAbiParameters, encodeErrorResult, encodeEventTopics, hashTypedData, keccak256, parseAbi, toHex } from "viem";
 import {
     BONDROUTE_ADDRESS,
     NATIVE_TOKEN,
@@ -20,6 +20,24 @@ import {
     RpcError,
     type ExecutionData,
 } from "../BondRoute";
+
+const BR_EVENTS_ABI = parseAbi([
+    "event BondExecuted(bytes32 indexed commitment_hash)",
+    "event BondProtocolReverted(bytes32 indexed commitment_hash, bytes call_output)",
+    "event BondValidationFailed(bytes32 indexed commitment_hash, string reason)",
+]);
+
+function bond_executed_receipt( commitment_hash: `0x${ string }`, blockNumber: bigint = 13n )
+{
+    const topics  =  encodeEventTopics({ abi: BR_EVENTS_ABI, eventName: "BondExecuted", args: { commitment_hash } });
+    return {
+        status:      "success" as const,
+        blockNumber,
+        logs: [
+            { address: BONDROUTE_ADDRESS, topics, data: "0x", blockNumber, transactionIndex: 0, logIndex: 0, removed: false, blockHash: null, transactionHash: null },
+        ],
+    };
+}
 
 const calc_commitment_hash  =  BondRoute.calc_commitment_hash;
 const hash_fundings         =  BondRoute.hash_fundings;
@@ -181,6 +199,10 @@ describe( "serialize_bond / deserialize_bond", () => {
             },
             commitment_hash: "0xcaffe0000000000000ac0c78d8221dcfdf931398a3a557f30a4a330370e53a84",
             state:           "prepared",
+            status:          "active",
+            execution_logs:  [],
+            revert_output:   "0x",
+            invalid_reason:  "",
         };
 
         const sdk    =  await make_sdk_for_records();
@@ -222,6 +244,10 @@ describe( "serialize_bond / deserialize_bond", () => {
             },
             execute_tx_hash:    "0xfedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
             execute_tx_nonce:   8,
+            status:             "active",
+            execution_logs:     [],
+            revert_output:      "0x",
+            invalid_reason:     "",
         };
 
         const sdk   =  await make_sdk_for_records();
@@ -477,9 +503,9 @@ describe( "BondRoute.prepare / storage", () => {
             on_pending_bond: ( bond ) => { recovered = bond; },
         });
 
-        const result = await recovered.resume();
+        await recovered.resume();
 
-        expect( result.status ).toBe( "executed" );
+        expect( recovered.status ).toBe( "executed" );
         expect( await storage.keys() ).toEqual( [] );
     });
 
@@ -543,8 +569,7 @@ describe( "BondRoute.prepare / storage", () => {
                 getBlockNumber: async () => 13n,
                 getTransactionCount: async () => 10,
                 estimateFeesPerGas: async () => ({ maxFeePerGas: 10n, maxPriorityFeePerGas: 1n }),
-                waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 13n }),
-                simulateContract: async () => ({ result: [ 1, "0x" ] }),
+                waitForTransactionReceipt: async () => bond_executed_receipt( bond_data.commitment_hash, 13n ),
             } as any,
             wallet_client: {
                 chain: {},
@@ -559,9 +584,9 @@ describe( "BondRoute.prepare / storage", () => {
         });
         const bond = sdk.deserialize_bond( serialize_bond( bond_data ) );
 
-        const result = await bond.resume();
+        await bond.resume();
 
-        expect( result.status ).toBe( "executed" );
+        expect( bond.status ).toBe( "executed" );
         expect( writes ).toEqual([ "execute_bond" ]);
         expect( bond.execute_tx_hash ).toBe( new_execute_hash );
     });
@@ -671,8 +696,7 @@ describe( "BondRoute.prepare / storage", () => {
                 getBlockNumber: async () => 13n,
                 getTransactionCount: async () => 10,
                 estimateFeesPerGas: async () => ({ maxFeePerGas: 10n, maxPriorityFeePerGas: 1n }),
-                waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 13n }),
-                simulateContract: async () => ({ result: [ 1, "0x" ] }),
+                waitForTransactionReceipt: async () => bond_executed_receipt( bond_data.commitment_hash, 13n ),
             } as any,
             wallet_client: {
                 chain: {},
