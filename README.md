@@ -418,54 +418,51 @@ const selectors = await protocol.BondRoute_get_protected_selectors();
 const protected_functions = abi.filter( fn => selectors.includes( fn.selector ) );
 ```
 
-### 2. Query Constraints
+> [!TIP]
+> The snippets below use [`@bondroute/sdk`](./sdk), which wraps quoting, timing, persistence, recovery, and transaction submission.
+> See [`sdk/README.md`](./sdk/README.md) for installation and full API.
 
-```javascript
-const calldata = encode_function_call( "swap", [token_out, min_amount_out] );
+### 2. Initialize the SDK
 
-const constraints = await protocol.BondRoute_quote_call(
-    calldata,
-    USDC,                       // Preferred stake token
-    [{ token: USDC, amount }]   // Preferred fundings (amount to swap)
-);
+```typescript
+import { BondRoute } from "@bondroute/sdk";
+
+const bondRoute  =  await BondRoute.init({
+    public_client, wallet_client, account,
+    on_pending_bond: ( bond ) => bond.resume( ),
+});
 ```
 
-### 3. Create Bond
+### 3. Prepare the Bond
+
+```typescript
+const calldata  =  encodeFunctionData({ abi, functionName: "swap", args: [ token_out, min_amount_out ] });
+
+const bond  =  await bondRoute.prepare({
+    protocol: protocol_address,
+    call: calldata,
+    preferred_stake_token: USDC,
+    preferred_fundings: [{ token: USDC, amount }],
+});
+```
+
+### 4. Dispatch the Bond
 
 > [!CAUTION]
-> **If you lose your salt, you cannot execute your bond and your stake is forfeited.** Use 32-bit (~4 billion) for recoverability — you can brute-force it in minutes if you know your other parameters (protocol call and exact fundings). Use 256-bit only if secrecy is paramount. Bots must also guess protocol, call, amounts, and tokens — the salt is just one factor in the commitment hash.
+> Bond execution is a two-tx flow (create then execute). If the create lands but execute never does, the stake is forfeited when the bond expires. The SDK handles this by persisting `execution_data` to storage **before** submitting create, and routing unfinished bonds through `on_pending_bond` on next init.
+>
+> Salt sizing: use 32-bit (~4 billion) so it remains brute-forceable in minutes if storage is lost but the rest of `execution_data` survives. Use 256-bit only if secrecy is paramount.
 
-```javascript
-const salt = random_uint32();  // 32-bit recommended for recoverability
-
-const execution_data = {
-    fundings: constraints.min_fundings,
-    stake: constraints.min_stake,
-    salt: salt,
-    protocol: protocol_address,
-    call: encoded_call
-};
-
-const commitment_hash = await BondRoute.__OFF_CHAIN__calc_commitment_hash( user_address, execution_data );
-
-// Create bond (wait for tx to be mined)
-const tx = await BondRoute.create_bond( commitment_hash, execution_data.stake );
-await tx.wait();
+```typescript
+const { status, output }  =  await bond.dispatch( );
+// Stake refunded on execution (success or graceful revert).
 ```
 
-### 4. Execute Bond
+`dispatch( )` refreshes chain state, checks balances, submits missing ERC20 approvals, creates the bond, waits until it is executable, then executes it. If approvals should be user-confirmed by your app instead of auto-submitted, call `bond.dispatch({ auto_approve: false })` and handle `NeedsApprovalError`.
 
-```javascript
-// Wait for minimum block delay (if any)
-// Note: BondRoute enforces 1 block minimum; protocol may require more via min_execution_delay_in_blocks
-await wait_for_blocks( constraints.min_execution_delay_in_blocks );
+If either tx gets stuck in the mempool, replace it at the same nonce with higher gas: `bond.bump_create( )` or `bond.bump_execute( )`.
 
-// Execute
-// TIP: Use a slightly higher gas price to ensure quick confirmation,
-// minimizing the window between bond creation and execution.
-const { status, output } = await BondRoute.execute_bond( execution_data );
-// Stake refunded on execution (success or graceful revert)
-```
+For manual `ExecutionData`, relayer flows, or manual lifecycle control, see [SDK docs](./sdk/README.md).
 
 ### 5. Gasless Option
 
@@ -473,15 +470,16 @@ const { status, output } = await BondRoute.execute_bond( execution_data );
 > For users who don't hold gas tokens — one off-chain signature, zero gas required.
 
 ```javascript
-// User signs once off-chain
-const { domain, type_string } = await BondRoute.__OFF_CHAIN__get_signing_info( execution_data );
-const types = parse_eip712_types( type_string );
-const signature = await user.signTypedData( domain, types, execution_data );
+// User side.
+const signature        =  await bond.sign_execution( );
+const serialized_bond  =  bond.serialize( );
 
-// Relayer submits both transactions
-await BondRoute.create_bond( commitment_hash, stake );                // Relayer pays gas
-await BondRoute.execute_bond_as( execution_data, user, signature );   // Relayer pays gas
-// Stake and native ETH always returns to USER, not relayer
+// Relayer side.
+const relayer_bond  =  bondRoute.deserialize_bond( serialized_bond );
+
+await relayer_bond.create( );
+await relayer_bond.wait_until_executable( );
+await relayer_bond.execute_as( signature );
 ```
 
 ---

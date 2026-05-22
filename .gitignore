@@ -3,6 +3,15 @@ cache/
 out/
 *.lock
 
+# Dependencies
+node_modules/
+sdk/node_modules/
+
+# Build artifacts
+dist/
+build/
+deploy/artifacts/
+
 # Ignores development broadcast logs
 !/broadcast
 /broadcast/*/31337/
@@ -13,11 +22,19 @@ docs/
 
 # Dotenv file
 .env
+.env.*
 
 # Claude Code
 .claude/
+
+# Local agent/tool state
+.agents/
+.codex/
 
 # Coverage reports
 lcov.info
 coverage/
 *.lcov
+
+# Logs
+*.log
