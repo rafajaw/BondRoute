@@ -677,6 +677,79 @@ describe( "BondRoute.prepare / storage", () => {
         await expect( bond.resume({ auto_approve: false }) ).rejects.toBeInstanceOf( NeedsApprovalError );
     });
 
+    test( "get_missing_approvals aggregates lifecycle consumption when stake and funding share a token", async () => {
+        // Stake = 100 USDC at create; funding = 1000 USDC at execute; held stake covers 100 of the funding,
+        // so user transferFroms total 100 + 900 = 1000 USDC across the bond lifecycle.
+        // With allowance = 500 (above stake-only need, below lifecycle need), the helper must still report it as missing.
+        const sdk = await BondRoute.init({
+            public_client: {
+                getChainId: async () => 1,
+                readContract: async ({ functionName }: any) => {
+                    if(  functionName === "allowance"  )  return 500n;
+                    throw bond_not_found_error( "0xcaffe0000000000000ac0c78d8221dcfdf931398a3a557f30a4a330370e53a84" );
+                },
+                getBalance: async () => 0n,
+            } as any,
+            wallet_client: { chain: {} } as any,
+            account: USER,
+            storage: make_storage(),
+            on_pending_bond: () => {},
+        });
+        const bond = sdk.bond({
+            fundings: [{ token: TOKEN_B, amount: 1000n }],
+            stake:    { token: TOKEN_B, amount: 100n },
+            salt:     42n,
+            protocol: PROTOCOL,
+            call:     "0xdeadbeef",
+        });
+
+        const approvals = await bond.get_missing_approvals();
+
+        expect( approvals.length ).toBe( 1 );
+        expect( approvals[0]!.token ).toBe( TOKEN_B );
+        expect( approvals[0]!.required ).toBe( 1000n );
+        expect( approvals[0]!.current_allowance ).toBe( 500n );
+        expect( approvals[0]!.phase ).toBe( "both" );
+    });
+
+    test( "approve_if_needed writes maxUint256 regardless of the bond's required amount", async () => {
+        const approve_args: any[] = [];
+        const sdk = await BondRoute.init({
+            public_client: {
+                getChainId: async () => 1,
+                readContract: async ({ functionName }: any) => {
+                    if(  functionName === "allowance"  )  return 0n;
+                    throw bond_not_found_error( "0xcaffe0000000000000ac0c78d8221dcfdf931398a3a557f30a4a330370e53a84" );
+                },
+                getBalance: async () => 1_000_000n,
+                waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 1n }),
+            } as any,
+            wallet_client: {
+                chain: {},
+                writeContract: async ({ functionName, args }: any) => {
+                    if(  functionName === "approve"  )  approve_args.push( args );
+                    return "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+                },
+            } as any,
+            account: USER,
+            storage: make_storage(),
+            on_pending_bond: () => {},
+        });
+        const bond = sdk.bond({
+            fundings: [{ token: TOKEN_B, amount: 1000n }],
+            stake:    { token: TOKEN_B, amount: 100n },
+            salt:     42n,
+            protocol: PROTOCOL,
+            call:     "0xdeadbeef",
+        });
+
+        await bond.approve_if_needed();
+
+        const max_uint256 = ( 2n ** 256n ) - 1n;
+        expect( approve_args.length ).toBe( 1 );
+        expect( approve_args[0]![1] ).toBe( max_uint256 );
+    });
+
     test( "resume approves missing execute funding allowance before execution", async () => {
         const writes: string[] = [];
         const bond_data = stored_bond({

@@ -21,6 +21,7 @@
 import {
     concat,
     keccak256,
+    maxUint256,
     pad,
     parseAbi,
     toHex,
@@ -1268,33 +1269,29 @@ export class BondRoute {
 
     async _get_missing_approvals( bond: Bond, phase_filter?: Approval[ "phase" ] ): Promise<Approval[]>
     {
-        const needs  =  new Map<string, Approval>();
+        // *SECURITY*  -  Aggregate per-token required amounts across phases BEFORE comparing to allowance.
+        //                Comparing per-phase would early-return on same-token stake/funding when allowance covers
+        //                one phase but not the lifecycle total, leaving the next phase silently under-approved.
+        type Need  =  { token: Address, required: bigint, phases: Set<"create" | "execute"> };
+        const totals  =  new Map<string, Need>();
 
-        const add = async ( token: Address, required: bigint, phase: Approval[ "phase" ] ) => {
+        const accumulate = ( token: Address, required: bigint, phase: "create" | "execute" ) => {
             if(  phase_filter !== undefined && phase !== phase_filter  )  return;
             if(  required === 0n || token.toLowerCase() === NATIVE_TOKEN.toLowerCase()  )  return;
-            const current_allowance  =  await this.public_client.readContract({
-                address:      token,
-                abi:          ERC20_ABI,
-                functionName: "allowance",
-                args:         [ bond.user, this.bondroute_address ],
-            }) as bigint;
-            if(  current_allowance >= required  )  return;
             const key       =  token.toLowerCase();
-            const existing  =  needs.get( key );
+            const existing  =  totals.get( key );
             if(  existing  )
             {
                 existing.required  +=  required;
-                existing.phase      =  existing.phase === phase  ?  phase  :  "both";
-                if(  current_allowance < existing.current_allowance  )  existing.current_allowance = current_allowance;
+                existing.phases.add( phase );
             }
             else
             {
-                needs.set( key, { token, spender: this.bondroute_address, required, current_allowance, phase } );
+                totals.set( key, { token, required, phases: new Set([ phase ]) } );
             }
         };
 
-        await add( bond.execution_data.stake.token, bond.execution_data.stake.amount, "create" );
+        accumulate( bond.execution_data.stake.token, bond.execution_data.stake.amount, "create" );
         for(  const f of bond.execution_data.fundings  )
         {
             let required  =  f.amount;
@@ -1302,9 +1299,25 @@ export class BondRoute {
             {
                 required  =  required > bond.execution_data.stake.amount  ?  required - bond.execution_data.stake.amount  :  0n;
             }
-            await add( f.token, required, "execute" );
+            accumulate( f.token, required, "execute" );
         }
-        return Array.from( needs.values() );
+
+        const result: Approval[]  =  [];
+        for(  const need of totals.values()  )
+        {
+            const current_allowance  =  await this.public_client.readContract({
+                address:      need.token,
+                abi:          ERC20_ABI,
+                functionName: "allowance",
+                args:         [ bond.user, this.bondroute_address ],
+            }) as bigint;
+            if(  current_allowance >= need.required  )  continue;
+            const phase: Approval[ "phase" ]  =  need.phases.size === 2
+                ?  "both"
+                :  ( need.phases.has( "create" )  ?  "create"  :  "execute" );
+            result.push({ token: need.token, spender: this.bondroute_address, required: need.required, current_allowance, phase });
+        }
+        return result;
     }
 
     async _get_missing_balances( bond: Bond ): Promise<BalanceShortfall[]>
@@ -1357,13 +1370,17 @@ export class BondRoute {
         const approvals  =  await this._get_missing_approvals( bond, phase_filter );
         if(  approvals.length === 0  )  return;
         if(  opts?.throw_on_missing  )  throw new NeedsApprovalError( approvals );
+
+        // *NOTE*  -  Auto-approval always writes `maxUint256` because BondRoute is a singleton gateway shared
+        //            across protocols; one infinite approval covers every future bond. Devs who want a tighter
+        //            cap should read `bond.get_missing_approvals()` and submit ERC20 `approve()` calls themselves.
         for(  const approval of approvals  )
         {
             const tx_hash  =  await this.wallet_client.writeContract({
                 address:      approval.token,
                 abi:          ERC20_ABI,
                 functionName: "approve",
-                args:         [ approval.spender, approval.required ],
+                args:         [ approval.spender, maxUint256 ],
                 account:      this.account,
                 chain:        this.wallet_client.chain as Chain,
             });
