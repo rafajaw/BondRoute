@@ -8,7 +8,7 @@ import { MockERC20 } from "@test/mocks/MockERC20.sol";
 import { MockBondRouteProtectedContract } from "@test/mocks/MockBondRouteProtectedContract.sol";
 import { ProtocolAnnounced } from "@BondRoute/Provider.sol";
 import { ExecutionData } from "@BondRoute/Core.sol";
-import { TokenAmount, BondConstraints, BondContext, Unauthorized, Range,
+import { TokenAmount, BondConstraints, BondContext, Unauthorized, Range, NATIVE_TOKEN,
          PossiblyBondFarming, InsufficientStake, InvalidStakeToken, InsufficientFunding,
          BondCreatedTooLate, EXECUTION_TOO_SOON_BLOCKS, EXECUTION_TOO_SOON_SECONDS, EXECUTION_TOO_LATE, BEFORE_EXECUTION_WINDOW,
          AFTER_EXECUTION_WINDOW, BONDROUTE_ADDRESS, UnsupportedCall } from "@BondRouteProtected/BondRouteProtected.sol";
@@ -1026,6 +1026,52 @@ contract BondRouteProtectedTest is Test {
 
         assertEq( user_balance_after, user_balance_before - 1000e6, "User balance decreased by exactly 1000 USDC" );
         assertEq( protocol_balance, 1000e6, "Protocol received 1000 USDC" );
+    }
+
+    function test_fundings_lib_pull_native( ) public
+    {
+        TokenAmount[] memory fundings  =  new TokenAmount[](1);
+        fundings[ 0 ]  =  TokenAmount({ token: NATIVE_TOKEN, amount: 1 ether });
+
+        ExecutionData memory execution_data  =  ExecutionData({
+            fundings: fundings,
+            stake: TokenAmount({ token: weth, amount: 10e18 }),
+            salt: 556,
+            protocol: mock_protected,
+            call: abi.encodeWithSelector( mock_protected.protected_swap.selector, 1 ether )
+        });
+
+        mock_protected.configure_constraints( BondConstraints({
+            min_stake: TokenAmount({ token: weth, amount: 10e18 }),
+            min_fundings: new TokenAmount[](0),
+            min_execution_delay_in_blocks: 0,
+            min_execution_delay_in_seconds: 0,
+            max_execution_delay_in_seconds: 0,
+            valid_creation_timestamp_range: Range({ min: 0, max: 0 }),
+            valid_execution_timestamp_range: Range({ min: 0, max: 0 })
+        }));
+
+        bytes32 commitment_hash  =  bond_route.__OFF_CHAIN__calc_commitment_hash( USER, execution_data );
+
+        vm.prank( USER );
+        bond_route.create_bond( commitment_hash, execution_data.stake );
+
+        vm.roll( block.number + 1 );
+        vm.warp( block.timestamp + 2 );
+
+        uint256 user_balance_before      =  USER.balance;
+        uint256 protocol_balance_before  =  address(mock_protected).balance;
+
+        vm.prank( USER );
+        ( BondStatus status, ) = bond_route.execute_bond{ value: 1 ether }( execution_data );
+
+        assertEq( uint(status), uint(BondStatus.EXECUTED), "Bond should execute successfully" );
+
+        uint256 user_balance_after      =  USER.balance;
+        uint256 protocol_balance_after  =  address(mock_protected).balance;
+
+        assertEq( user_balance_after, user_balance_before - 1 ether, "User balance decreased by exactly 1 native token" );
+        assertEq( protocol_balance_after, protocol_balance_before + 1 ether, "Protocol received 1 native token" );
     }
 
     function test_fundings_lib_send( ) public

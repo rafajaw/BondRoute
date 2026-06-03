@@ -424,6 +424,7 @@ interface IBondRouteProtectedTests {
     // ─── FundingsLib ──────────────────────────────────────────────────────────────
     function test_fundings_lib_send() external;
     function test_fundings_lib_pull() external;
+    function test_fundings_lib_pull_native() external;
     function test_fundings_lib_send_zero_amount_no_op() external;
 
     // ─── BondRoute_entry_point() Return Values ────────────────────────────────────
@@ -695,8 +696,8 @@ interface IGasBenchmarkTests {
 // SUMMARY STATISTICS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //
-// Total Tests Declared:      383
-// Implemented & Passing:     383 (✓)
+// Total Tests Declared:      384
+// Implemented & Passing:     384 (✓)
 //
 // Coverage by Contract:
 // - Storage.sol:               100% (24/24)
@@ -706,7 +707,7 @@ interface IGasBenchmarkTests {
 // - Provider.sol:              100% (37/37)
 // - Collector.sol:             100% (25/25)
 // - BondRoute.sol:             100% (18/18)
-// - BondRouteProtected.sol:    100% (38/38)
+// - BondRouteProtected.sol:    100% (39/39)
 // - ReentrancyLock.sol:        100% (20/20)
 // - CrossFunctionReentrancy:   100% (11/11)
 // - ValidationLib.sol:         100% (28/28)

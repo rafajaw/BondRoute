@@ -498,6 +498,16 @@ abstract contract BondRouteProtected is IBondRouteProtected {
         if(  bytes(name).length > 0  )  BondRoute.announce_protocol( name, description );
     }
 
+    /**
+     * @notice Accept native token from BondRoute.
+     * @dev If overriding, keep accepting native transfers from BondRoute to allow native fundings into this contract.
+     */
+    receive( )
+    external  payable  virtual
+    {
+        if(  msg.sender != address(BondRoute)  )  revert( "BondRouteProtected: unknown native transfer" );
+    }
+
 
     // ━━━━  REQUIRED OVERRIDES  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
