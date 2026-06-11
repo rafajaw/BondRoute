@@ -331,7 +331,14 @@ function default_storage(): Storage
             "Pass `storage: { get, set, remove, keys }` to BondRoute.init() or set `storage: 'memory'` to opt out of recovery (NOT recommended)."
         );
     }
-    return (globalThis as any).localStorage as Storage;
+    // Adapt the browser localStorage API (getItem/setItem/removeItem/key/length) to the Storage interface (get/set/remove/keys).
+    const ls  =  (globalThis as any).localStorage;
+    return {
+        get:    ( k ) => ls.getItem( k ),
+        set:    ( k, v ) => { ls.setItem( k, v ); },
+        remove: ( k ) => { ls.removeItem( k ); },
+        keys:   () => { const out: string[] = []; for( let i = 0; i < ls.length; i++ ) { const key = ls.key( i ); if( key !== null ) out.push( key ); } return out; },
+    };
 }
 
 function memory_storage(): Storage
