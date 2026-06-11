@@ -1635,12 +1635,11 @@ export class BondRoute {
         }
         catch( err )
         {
-            const solidity_error = decode_solidity_error( err );
-            if(  solidity_error?.name !== "BondNotFound"  )
-            {
-                if(  solidity_error  )  throw new BondrouteContractError( solidity_error, err );
-                throw new RpcError( "Failed to read BondRoute bond info.", err );
-            }
+            // `__OFF_CHAIN__get_bond_info` reverts ONLY when the bond is not on-chain — a not-yet-committed bond, or a node that
+            // hasn't caught up to a fresh commit (and the not-found selector may not even be in our ABI). So treat ANY contract
+            // revert as "missing" (the bond simply isn't there yet — the caller polls again); only a transport/RPC error throws.
+            const is_revert  =  decode_solidity_error( err ) !== undefined || find_revert_data( err ) !== undefined;
+            if(  is_revert === false  )  throw new RpcError( "Failed to read BondRoute bond info.", err );
             bond.chain_state = "missing";
             if(  create_tx_status === "pending"  )  bond.state = "creating";
             else if(  bond.state === "unknown"  )   bond.state = "prepared";
