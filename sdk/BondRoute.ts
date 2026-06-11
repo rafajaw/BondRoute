@@ -535,7 +535,7 @@ const BONDROUTE_ABI  =  parseAbi([
 const BOND_STATUS  =  [ "active", "executed", "invalid_bond", "protocol_reverted", "liquidated" ] as const;
 
 const PROTECTED_ABI  =  parseAbi([
-    "function BondRoute_quote_call(bytes call, address preferred_stake_token, (address token, uint256 amount)[] preferred_fundings) external view returns ((address token, uint256 amount) min_stake, (address token, uint256 amount)[] min_fundings, uint256 min_execution_delay_in_blocks, uint256 min_execution_delay_in_seconds, uint256 max_execution_delay_in_seconds, (uint256 min, uint256 max) valid_creation_timestamp_range, (uint256 min, uint256 max) valid_execution_timestamp_range)",
+    "function BondRoute_quote_call(bytes call, address preferred_stake_token, (address token, uint256 amount)[] preferred_fundings) external view returns (((address token, uint256 amount) min_stake, (address token, uint256 amount)[] min_fundings, uint256 min_execution_delay_in_blocks, uint256 min_execution_delay_in_seconds, uint256 max_execution_delay_in_seconds, (uint256 min, uint256 max) valid_creation_timestamp_range, (uint256 min, uint256 max) valid_execution_timestamp_range) constraints)",
 ]);
 
 const ERC20_ABI  =  parseAbi([
@@ -1057,15 +1057,16 @@ export class BondRoute {
             functionName: "BondRoute_quote_call",
             args:         [ call, preferred_stake, preferred_fundings ],
         });
-        const [ min_stake, min_fundings, mblocks, mseconds, max_seconds, vcrange, verange ]  =  result as any;
+        // The contract returns a single `BondConstraints` struct, so viem decodes it as one named-tuple object.
+        const c  =  result as any;
         return {
-            min_stake,
-            min_fundings:                    Array.from( min_fundings as TokenAmount[] ),
-            min_execution_delay_in_blocks:   mblocks,
-            min_execution_delay_in_seconds:  mseconds,
-            max_execution_delay_in_seconds:  max_seconds,
-            valid_creation_timestamp_range:  vcrange,
-            valid_execution_timestamp_range: verange,
+            min_stake:                       c.min_stake,
+            min_fundings:                    Array.from( c.min_fundings as TokenAmount[] ),
+            min_execution_delay_in_blocks:   c.min_execution_delay_in_blocks,
+            min_execution_delay_in_seconds:  c.min_execution_delay_in_seconds,
+            max_execution_delay_in_seconds:  c.max_execution_delay_in_seconds,
+            valid_creation_timestamp_range:  c.valid_creation_timestamp_range,
+            valid_execution_timestamp_range: c.valid_execution_timestamp_range,
         };
     }
 
