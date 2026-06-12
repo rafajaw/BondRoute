@@ -1607,14 +1607,35 @@ export class BondRoute {
         bond.execute_tx_status  =  execute_tx_status;
 
         bond.chain_state = "unknown";
-        try
+        // Resilient read against a flaky public RPC. `__OFF_CHAIN__get_bond_info` REVERTS only when the bond is not on-chain
+        // yet (not-yet-committed, or a node lagging a fresh commit) — treat any revert as "missing" and let the caller poll
+        // again. A transport/RPC error (timeout, null, rate-limit) is transient, so settle 1.5s and retry a few times before
+        // giving up: a single hiccup must not abort a self-execute/gasless flow mid-commit.
+        let info: any                 =  undefined;
+        let bond_is_missing           =  false;
+        let last_read_error: unknown  =  undefined;
+        for(  let attempt = 0  ;  attempt < 6  ;  attempt = attempt + 1  )
         {
-            const info  =  await this.public_client.readContract({
-                address:      this.bondroute_address,
-                abi:          BONDROUTE_ABI,
-                functionName: "__OFF_CHAIN__get_bond_info",
-                args:         [ bond.commitment_hash, bond.execution_data.stake ],
-            }) as any;
+            try
+            {
+                info  =  await this.public_client.readContract({
+                    address:      this.bondroute_address,
+                    abi:          BONDROUTE_ABI,
+                    functionName: "__OFF_CHAIN__get_bond_info",
+                    args:         [ bond.commitment_hash, bond.execution_data.stake ],
+                }) as any;
+                break;
+            }
+            catch( err )
+            {
+                if(  decode_solidity_error( err ) !== undefined || find_revert_data( err ) !== undefined  )  { bond_is_missing = true; break; }
+                last_read_error  =  err;
+                await new Promise(( resolve ) => setTimeout( resolve, 1500 ));
+            }
+        }
+
+        if(  info !== undefined  )
+        {
             bond.creation_timestamp  =  BigInt( info.creation_time );
             bond.creation_block      =  BigInt( info.creation_block );
             bond.chain_state         =  "found";
@@ -1633,16 +1654,15 @@ export class BondRoute {
                 bond.state  =  "settled";
             }
         }
-        catch( err )
+        else if(  bond_is_missing  )
         {
-            // `__OFF_CHAIN__get_bond_info` reverts ONLY when the bond is not on-chain — a not-yet-committed bond, or a node that
-            // hasn't caught up to a fresh commit (and the not-found selector may not even be in our ABI). So treat ANY contract
-            // revert as "missing" (the bond simply isn't there yet — the caller polls again); only a transport/RPC error throws.
-            const is_revert  =  decode_solidity_error( err ) !== undefined || find_revert_data( err ) !== undefined;
-            if(  is_revert === false  )  throw new RpcError( "Failed to read BondRoute bond info.", err );
             bond.chain_state = "missing";
             if(  create_tx_status === "pending"  )  bond.state = "creating";
             else if(  bond.state === "unknown"  )   bond.state = "prepared";
+        }
+        else
+        {
+            throw new RpcError( "Failed to read BondRoute bond info.", last_read_error );
         }
 
         const snapshot = await this._local_executability( bond );
